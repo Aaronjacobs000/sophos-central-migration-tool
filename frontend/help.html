@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Help — Sophos Central Migration Tool</title>
+  <link rel="stylesheet" href="/css/base.css" />
+  <link rel="stylesheet" href="/css/components.css" />
+</head>
+<body>
+  <header id="app-nav" class="app-nav"></header>
+
+  <main class="page-main">
+    <h1>Help &amp; prerequisites</h1>
+    <p class="page-lead">Everything you need to know to use this tool safely.</p>
+
+    <section class="panel-card">
+      <h2>What this tool does</h2>
+      <p>Connects to two Sophos Central tenants — a <strong>source</strong> and a
+        <strong>destination</strong> — and lets you migrate configuration and
+        devices between them via the official Sophos APIs. It does not replicate
+        the entire tenant; it gives you targeted, auditable control over what
+        moves and when.</p>
+      <ul>
+        <li><strong>Endpoint policies</strong> — list, deep-diff, and clone (or overwrite) on the destination.</li>
+        <li><strong>Endpoint groups</strong> — mirror by name and metadata. Membership is not copied (see below).</li>
+        <li><strong>Exclusions and allow/block lists</strong> — copy scanning exclusions, allowed items, and blocked items.</li>
+        <li><strong>Device migration</strong> — uses the official two-tenant migration flow. Devices keep their identity and check in to the destination on next online.</li>
+      </ul>
+    </section>
+
+    <section class="panel-card" style="margin-top:1.25rem;">
+      <h2>Before you start</h2>
+      <ol>
+        <li>Sign in to the <strong>source</strong> Sophos Central tenant as a Super Admin.</li>
+        <li>Open <strong>Global Settings → API Credentials</strong> and click <em>Add Credential</em>. Pick a Super Admin role and copy the Client ID and Client Secret.</li>
+        <li>Repeat the same steps in the <strong>destination</strong> tenant.</li>
+        <li>This tool only uses tenant-scoped API credentials — partner or organization credentials are not supported.</li>
+        <li>On the destination tenant, confirm <strong>Device Migration is enabled</strong> in
+          <em>Global Settings → Device Migration</em>. The destination must allow incoming migrations within a defined time window.</li>
+      </ol>
+    </section>
+
+    <section class="panel-card" style="margin-top:1.25rem;">
+      <h2>The 14-day window</h2>
+      <p>Sophos's device migration flow requires every selected endpoint to <strong>check
+        in within 14 days</strong> for the migration to land. This tool enforces it twice:</p>
+      <ul>
+        <li>Endpoints with stale <code>lastSeenAt</code> are greyed out and cannot be selected.</li>
+        <li>The server runs a preflight check before creating jobs and refuses to start if any selected endpoint is outside the window.</li>
+      </ul>
+      <p>If a device fails to check in during the window, the migration entry stays pending on Sophos's side and you'll need to re-queue it later.</p>
+    </section>
+
+    <section class="panel-card" style="margin-top:1.25rem;">
+      <h2>Migration workflow (devices)</h2>
+      <ol>
+        <li>Pick endpoints on the <a href="/endpoints.html">Endpoints</a> page. Stale ones are blocked.</li>
+        <li>Click <strong>Start migration</strong> to go to the migration form.</li>
+        <li>Optionally run a <strong>dry run</strong> to see what will happen, with no upstream writes.</li>
+        <li>When ready, give the job a name, tick the 14-day acknowledgement, and create the migration jobs. The tool calls Sophos to create a receiving job on the destination tenant, then a sending job on the source tenant with the receiver's handshake token.</li>
+        <li>The job detail page subscribes to a server-side event stream and shows live status as devices migrate.</li>
+      </ol>
+    </section>
+
+    <section class="panel-card" style="margin-top:1.25rem;">
+      <h2>Group membership caveat</h2>
+      <p>When you mirror an endpoint group, only the name and metadata are copied. The
+        list of member endpoint IDs is meaningless in the destination tenant, so it is
+        intentionally omitted. Devices reconstitute group membership on the destination
+        side based on its policies after they migrate.</p>
+    </section>
+
+    <section class="panel-card" style="margin-top:1.25rem;">
+      <h2>Dry-run mode</h2>
+      <p>Every migration action — policies, groups, exclusions, and device migrations
+        — supports a dry-run that returns the plan the server <em>would</em> execute
+        without touching the destination tenant. Use it the first few times until you
+        are comfortable with what gets created.</p>
+    </section>
+
+    <section class="panel-card" style="margin-top:1.25rem;">
+      <h2>Audit log</h2>
+      <p>Every mutation against either tenant is recorded as a JSON line in
+        <code>data/audit.log</code> with a timestamp, request ID, side, resource ID,
+        and either the success detail or the error message. Keep it for change-control
+        records.</p>
+    </section>
+
+    <section class="panel-card" style="margin-top:1.25rem;">
+      <h2>Security</h2>
+      <ul>
+        <li>The server only listens on <code>127.0.0.1</code>. It is not reachable from the network.</li>
+        <li>Credentials are stored in <code>.env</code> at the repo root. The file is in <code>.gitignore</code>. Do not back it up to cloud drives. Run on a workstation with full-disk encryption.</li>
+        <li>Secrets are never returned by the API; the credentials page shows masked values.</li>
+        <li>Destructive actions (delete, overwrite, cancel migration) require an explicit confirmation.</li>
+      </ul>
+    </section>
+
+    <section class="panel-card" style="margin-top:1.25rem;">
+      <h2>Useful links</h2>
+      <ul>
+        <li><a href="https://docs.sophos.com/central/customer/help/en-us/ManageYourProducts/GlobalSettings/DeviceMigration/" target="_blank" rel="noopener">Sophos device migration documentation</a></li>
+        <li><a href="https://developer.sophos.com/" target="_blank" rel="noopener">Sophos developer portal</a></li>
+        <li><a href="https://github.com/Aaronjacobs000/sophos-central-mcp" target="_blank" rel="noopener">sophos-central-mcp repo</a> (the upstream MCP server some of the API code is vendored from)</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer id="page-footer" class="page-footer"></footer>
+  <script type="module" src="/js/page-help.js"></script>
+</body>
+</html>

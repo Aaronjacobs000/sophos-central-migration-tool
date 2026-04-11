@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Welcome — Sophos Central Migration Tool</title>
+  <link rel="stylesheet" href="/css/base.css" />
+  <link rel="stylesheet" href="/css/components.css" />
+</head>
+<body class="welcome-body">
+  <div class="welcome-shell">
+    <img class="welcome-logo" src="/sophos-logo-white.svg" alt="Sophos" />
+
+    <main class="welcome-card">
+      <div class="welcome-card-body">
+        <header class="welcome-header">
+          <h1>Sophos Central Migration Tool</h1>
+          <p class="tagline">Let's get you connected.</p>
+        </header>
+
+        <ol class="wizard-steps" id="wizard-steps">
+          <li data-step="1" class="active">1. Mode</li>
+          <li data-step="2">2. Credentials</li>
+          <li data-step="3">3. Tenants</li>
+          <li data-step="4">4. Save</li>
+        </ol>
+
+        <!-- Step 1: Mode picker -->
+        <section class="wizard-panel" data-step="1">
+          <h2>How do you want to connect?</h2>
+          <div class="mode-picker">
+            <label class="mode-option">
+              <input type="radio" name="mode" value="direct" checked />
+              <div class="mode-card">
+                <strong>Direct tenant credentials</strong>
+                <p>You have a Client ID and Secret for each of the two tenants. Create these
+                  in each tenant under <em>Global Settings → API Credentials</em>.</p>
+              </div>
+            </label>
+            <label class="mode-option">
+              <input type="radio" name="mode" value="partner" />
+              <div class="mode-card">
+                <strong>Partner / organization credentials</strong>
+                <p>You have a single set of partner or organization API credentials that
+                  manage multiple tenants. You'll pick source and destination from the
+                  tenant list.</p>
+              </div>
+            </label>
+          </div>
+          <div class="wizard-actions">
+            <button id="to-step-2" class="btn btn-primary">Continue</button>
+          </div>
+        </section>
+
+        <!-- Step 2: Credentials (content changes based on mode) -->
+        <section class="wizard-panel hidden" data-step="2">
+          <!-- Direct mode -->
+          <div id="direct-creds">
+            <h2>Source tenant credentials</h2>
+            <p>The tenant devices and configuration are being migrated <strong>from</strong>.</p>
+            <form id="source-form" class="cred-form">
+              <label>Tenant name <span class="hint">(the API doesn't return this for direct creds — enter it here)</span>
+                <input type="text" name="label" autocomplete="off" spellcheck="false" placeholder="Acme Corp" />
+              </label>
+              <label>Client ID
+                <input type="text" name="clientId" autocomplete="off" spellcheck="false" required />
+              </label>
+              <label>Client Secret
+                <input type="password" name="clientSecret" autocomplete="off" required />
+              </label>
+            </form>
+            <div class="test-result" id="source-test-result"></div>
+            <div class="wizard-actions">
+              <button class="btn" data-back="1">Back</button>
+              <button id="test-source" class="btn">Test connection</button>
+              <button id="to-step-2b" class="btn btn-primary" disabled>Continue to destination</button>
+            </div>
+          </div>
+
+          <!-- Partner mode -->
+          <div id="partner-creds" class="hidden">
+            <h2>Partner / organization credentials</h2>
+            <p>Enter the API credentials for your partner or organization account.</p>
+            <form id="partner-form" class="cred-form">
+              <label>Friendly label <span class="hint">(optional)</span>
+                <input type="text" name="label" autocomplete="off" spellcheck="false" placeholder="My Partner Account" />
+              </label>
+              <label>Client ID
+                <input type="text" name="clientId" autocomplete="off" spellcheck="false" required />
+              </label>
+              <label>Client Secret
+                <input type="password" name="clientSecret" autocomplete="off" required />
+              </label>
+            </form>
+            <div class="test-result" id="partner-test-result"></div>
+            <div class="wizard-actions">
+              <button class="btn" data-back="1">Back</button>
+              <button id="test-partner" class="btn">Test &amp; load tenants</button>
+              <button id="partner-to-step-3" class="btn btn-primary" disabled>Continue</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Step 2b: Destination tenant (direct mode only) -->
+        <section class="wizard-panel hidden" data-step="2b">
+          <h2>Destination tenant credentials</h2>
+          <p>The tenant devices and configuration are being migrated <strong>to</strong>.</p>
+          <form id="dest-form" class="cred-form">
+            <label>Tenant name <span class="hint">(the API doesn't return this for direct creds — enter it here)</span>
+              <input type="text" name="label" autocomplete="off" spellcheck="false" placeholder="Acme Corp - New" />
+            </label>
+            <label>Client ID
+              <input type="text" name="clientId" autocomplete="off" spellcheck="false" required />
+            </label>
+            <label>Client Secret
+              <input type="password" name="clientSecret" autocomplete="off" required />
+            </label>
+          </form>
+          <div class="test-result" id="dest-test-result"></div>
+          <div class="wizard-actions">
+            <button class="btn" data-back="2">Back</button>
+            <button id="test-dest" class="btn">Test connection</button>
+            <button id="direct-to-step-4" class="btn btn-primary" disabled>Review &amp; save</button>
+          </div>
+        </section>
+
+        <!-- Step 3: Tenant selector (partner mode only) -->
+        <section class="wizard-panel hidden" data-step="3">
+          <h2>Select source and destination tenants</h2>
+          <p>Pick which tenants to migrate between from your managed tenant list.</p>
+          <div class="cred-form">
+            <label>Source tenant
+              <select id="partner-source-select"><option value="">— select —</option></select>
+            </label>
+            <label>Source label <span class="hint">(optional override)</span>
+              <input type="text" id="partner-source-label" autocomplete="off" spellcheck="false" />
+            </label>
+            <label>Destination tenant
+              <select id="partner-dest-select"><option value="">— select —</option></select>
+            </label>
+            <label>Destination label <span class="hint">(optional override)</span>
+              <input type="text" id="partner-dest-label" autocomplete="off" spellcheck="false" />
+            </label>
+          </div>
+          <div class="wizard-actions">
+            <button class="btn" data-back="2">Back</button>
+            <button id="partner-to-step-4" class="btn btn-primary" disabled>Review &amp; save</button>
+          </div>
+        </section>
+
+        <!-- Step 4: Review -->
+        <section class="wizard-panel hidden" data-step="4">
+          <h2>Review &amp; save</h2>
+          <p>If this looks right, save the configuration and head to the dashboard.</p>
+          <div id="review-summary" class="review-summary"></div>
+          <div class="wizard-actions">
+            <button class="btn" id="review-back">Back</button>
+            <button id="save-config" class="btn btn-primary">Save configuration</button>
+          </div>
+          <div id="save-error" class="error-box hidden"></div>
+        </section>
+      </div>
+      <div class="welcome-card-footer">
+        Security Operations powered by <strong>Secureworks</strong>
+      </div>
+    </main>
+
+    <footer class="page-footer">
+      <p class="copyright">© 1997 - 2026 Sophos Ltd. All rights reserved.</p>
+    </footer>
+  </div>
+
+  <script type="module" src="/js/page-welcome.js"></script>
+</body>
+</html>

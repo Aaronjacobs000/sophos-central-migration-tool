@@ -1,0 +1,20 @@
+# Environment & secrets
+.env
+.env.local
+
+# Runtime state
+data/
+*.log
+
+# Build output
+backend/dist/
+
+# Dependencies
+node_modules/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

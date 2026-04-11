@@ -1,0 +1,153 @@
+/* Sophos Central dashboard dark theme. */
+
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+
+:root {
+  /* Sophos Central dark palette (matched to the dashboard screenshot) */
+  --sophos-primary: #1576d1;
+  --sophos-primary-bright: #3691e3;
+  --sophos-primary-dark: #0e63b5;
+
+  /* Backgrounds */
+  --bg-page: #0a1828;            /* page body */
+  --bg-header: #07111e;          /* top nav strip */
+  --bg-surface-1: #11243a;       /* cards, panels */
+  --bg-surface-2: #15293f;       /* nested cards, table headers */
+  --bg-surface-3: #1d3550;       /* hover, dropdown items */
+  --bg-input: #0d1f31;
+  --bg-overlay: rgba(8, 18, 31, 0.85);
+
+  /* Borders / dividers */
+  --border-default: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.16);
+
+  /* Text */
+  --text: #e6ebf3;
+  --text-strong: #ffffff;
+  --text-muted: #8a99ae;
+  --text-faint: #5b6c83;
+  --text-link: #4ea3f5;
+
+  /* Status colors (matched to the dashboard alerts) */
+  --status-ok: #5cc26b;
+  --status-amber: #f5a623;
+  --status-error: #f04747;
+  --status-info: #3691e3;
+
+  /* Convenience aliases used by older selectors */
+  --sophos-text: var(--text);
+  --sophos-text-muted: var(--text-muted);
+  --sophos-link: var(--text-link);
+  --sophos-white: var(--text-strong);
+  --sophos-grey-100: var(--bg-surface-2);
+  --sophos-grey-200: var(--bg-surface-3);
+  --sophos-grey-300: var(--border-default);
+  --sophos-grey-500: var(--text-muted);
+  --sophos-grey-700: var(--text-muted);
+  --sophos-grey-900: var(--text);
+  --sophos-navy: var(--bg-header);
+  --sophos-border: var(--border-default);
+  --sophos-footer-grey: var(--bg-surface-2);
+  --sophos-green: var(--status-ok);
+  --sophos-amber: var(--status-amber);
+  --sophos-red: var(--status-error);
+
+  --sophos-bg-gradient: var(--bg-page);
+
+  --font-sans:
+    "Inter", "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue",
+    Arial, sans-serif;
+  --font-mono:
+    "Cascadia Mono", "Consolas", "SF Mono", "Courier New", monospace;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+
+  --shadow-low: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-mid: 0 4px 16px rgba(0, 0, 0, 0.5);
+
+  --easing-default: cubic-bezier(0.645, 0.045, 0.355, 1);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  color: var(--text);
+  background: var(--bg-page);
+  min-height: 100vh;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4 {
+  color: var(--text-strong);
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+h1 { font-size: 1.5rem; margin: 0 0 1rem 0; }
+h2 { font-size: 1.0625rem; margin: 0 0 0.75rem 0; font-weight: 600; }
+h3 { font-size: 0.9375rem; margin: 0 0 0.5rem 0; font-weight: 600; }
+
+a {
+  color: var(--text-link);
+  text-decoration: none;
+  transition: color 0.2s var(--easing-default);
+}
+a:hover {
+  text-decoration: underline;
+}
+
+p {
+  color: var(--text);
+}
+
+code {
+  font-family: var(--font-mono);
+  background: var(--bg-surface-2);
+  padding: 0.1rem 0.35rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.85em;
+  color: var(--text);
+  border: 1px solid var(--border-default);
+}
+
+pre {
+  font-family: var(--font-mono);
+  background: var(--bg-surface-2);
+  padding: 0.85rem;
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  font-size: 0.8rem;
+  color: var(--text);
+  border: 1px solid var(--border-default);
+}
+
+::placeholder {
+  color: var(--text-faint);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-page);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--bg-surface-3);
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2a4666;
+}
+
+.hidden { display: none !important; }

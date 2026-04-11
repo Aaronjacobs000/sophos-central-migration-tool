@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Start migration — Sophos Central Migration Tool</title>
+  <link rel="stylesheet" href="/css/base.css" />
+  <link rel="stylesheet" href="/css/components.css" />
+</head>
+<body>
+  <header id="app-nav" class="app-nav"></header>
+
+  <main class="page-main">
+    <h1>Start a device migration</h1>
+    <p class="page-lead">Review your selection, give the migration a name, and confirm
+      you understand the 14-day window before launching.</p>
+
+    <section class="panel-card">
+      <h2>Selected endpoints</h2>
+      <p id="direction-display" class="hint"></p>
+      <div id="selection-list"><div class="empty-state">Loading…</div></div>
+    </section>
+
+    <section class="panel-card" style="margin-top:1.25rem;">
+      <h2>Migration details</h2>
+      <form id="migrate-form" class="cred-form">
+        <label>Migration job name
+          <input type="text" name="jobName" required placeholder="e.g. Acme tenant migration 2026-04" />
+        </label>
+        <label class="checkbox">
+          <input type="checkbox" id="ack-window" />
+          I understand devices must be online and check in within 14 days for the migration to succeed.
+        </label>
+        <div class="form-actions">
+          <button id="dry-run-btn" type="button" class="btn">Preview (dry run)</button>
+          <button id="start-btn" type="button" class="btn btn-primary" disabled>Create migration jobs</button>
+        </div>
+      </form>
+      <div id="result-area"></div>
+    </section>
+  </main>
+
+  <footer id="page-footer" class="page-footer"></footer>
+  <script type="module" src="/js/page-migrate.js"></script>
+</body>
+</html>

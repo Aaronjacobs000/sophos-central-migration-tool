@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Groups — Sophos Central Migration Tool</title>
+  <link rel="stylesheet" href="/css/base.css" />
+  <link rel="stylesheet" href="/css/components.css" />
+</head>
+<body>
+  <header id="app-nav" class="app-nav"></header>
+
+  <main class="page-main">
+    <h1>Groups</h1>
+    <p class="page-lead">Mirror endpoint groups and user groups from source to destination.
+      Only the group name and metadata are copied — membership is not transferred.</p>
+
+    <div class="tabs">
+      <button class="tab active" data-tab="endpoint">Endpoint groups</button>
+      <button class="tab" data-tab="user">User groups</button>
+    </div>
+
+    <div class="split-row">
+      <section class="panel-card">
+        <div class="panel-toolbar">
+          <h2>Source</h2>
+          <span class="spacer"></span>
+          <input type="search" id="search-source" placeholder="Filter…" />
+          <button id="select-all-source" class="btn btn-small">Select all</button>
+          <button id="clear-source" class="btn btn-small">Clear</button>
+        </div>
+        <div id="table-source"><div class="empty-state">Loading…</div></div>
+      </section>
+      <section class="panel-card">
+        <div class="panel-toolbar">
+          <h2>Destination</h2>
+          <span class="spacer"></span>
+          <input type="search" id="search-dest" placeholder="Filter…" />
+        </div>
+        <div id="table-dest"><div class="empty-state">Loading…</div></div>
+      </section>
+    </div>
+  </main>
+
+  <div id="selection-basket" class="selection-basket hidden">
+    <span><span id="basket-count">0</span> source groups selected</span>
+    <button id="basket-mirror" class="btn btn-primary">Mirror to destination</button>
+  </div>
+
+  <footer id="page-footer" class="page-footer"></footer>
+  <script type="module" src="/js/page-groups.js"></script>
+</body>
+</html>

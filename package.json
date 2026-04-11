@@ -1,0 +1,27 @@
+{
+  "name": "sophos-central-migration-tool",
+  "version": "0.1.0",
+  "description": "Locally-run web tool for migrating configuration and devices between two Sophos Central tenants.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "npm run build && node backend/dist/server.js",
+    "dev": "tsc --watch & node --watch backend/dist/server.js",
+    "clean": "rimraf backend/dist"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.9.0",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.6.3"
+  }
+}

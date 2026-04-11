@@ -1,0 +1,102 @@
+import { Router } from "express";
+import { sideParam } from "../middleware/side-param.js";
+import { requireConfigured } from "../middleware/require-configured.js";
+import {
+  listGroups,
+  getGroup,
+  createGroup,
+  deleteGroup,
+  listGroupMembers,
+} from "../sophos/api/groups.js";
+import {
+  listUserGroups,
+  createUserGroup,
+  deleteUserGroup,
+} from "../sophos/api/user-groups.js";
+
+export const groupsRouter = Router();
+
+groupsRouter.use("/:side/groups", requireConfigured, sideParam);
+groupsRouter.use("/:side/user-groups", requireConfigured, sideParam);
+
+groupsRouter.get("/:side/groups", async (_req, res, next) => {
+  try {
+    const ctx = res.locals.tenantContext!;
+    const items = await listGroups(ctx.client, ctx.tenantId);
+    res.json({ items });
+  } catch (err) {
+    next(err);
+  }
+});
+
+groupsRouter.get("/:side/groups/:id", async (req, res, next) => {
+  try {
+    const ctx = res.locals.tenantContext!;
+    const group = await getGroup(ctx.client, ctx.tenantId, req.params.id!);
+    res.json(group);
+  } catch (err) {
+    next(err);
+  }
+});
+
+groupsRouter.get("/:side/groups/:id/members", async (req, res, next) => {
+  try {
+    const ctx = res.locals.tenantContext!;
+    const items = await listGroupMembers(ctx.client, ctx.tenantId, req.params.id!);
+    res.json({ items });
+  } catch (err) {
+    next(err);
+  }
+});
+
+groupsRouter.post("/:side/groups", async (req, res, next) => {
+  try {
+    const ctx = res.locals.tenantContext!;
+    const created = await createGroup(ctx.client, ctx.tenantId, req.body);
+    res.status(201).json(created);
+  } catch (err) {
+    next(err);
+  }
+});
+
+groupsRouter.delete("/:side/groups/:id", async (req, res, next) => {
+  try {
+    const ctx = res.locals.tenantContext!;
+    await deleteGroup(ctx.client, ctx.tenantId, req.params.id!);
+    res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+// --- User groups ---
+
+groupsRouter.get("/:side/user-groups", async (_req, res, next) => {
+  try {
+    const ctx = res.locals.tenantContext!;
+    const items = await listUserGroups(ctx.client, ctx.tenantId);
+    res.json({ items });
+  } catch (err) {
+    next(err);
+  }
+});
+
+groupsRouter.post("/:side/user-groups", async (req, res, next) => {
+  try {
+    const ctx = res.locals.tenantContext!;
+    const created = await createUserGroup(ctx.client, ctx.tenantId, req.body);
+    res.status(201).json(created);
+  } catch (err) {
+    next(err);
+  }
+});
+
+groupsRouter.delete("/:side/user-groups/:id", async (req, res, next) => {
+  try {
+    const ctx = res.locals.tenantContext!;
+    await deleteUserGroup(ctx.client, ctx.tenantId, req.params.id!);
+    res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+});

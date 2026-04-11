@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Migration job — Sophos Central Migration Tool</title>
+  <link rel="stylesheet" href="/css/base.css" />
+  <link rel="stylesheet" href="/css/components.css" />
+</head>
+<body>
+  <header id="app-nav" class="app-nav"></header>
+
+  <main class="page-main">
+    <h1 id="job-title">Migration job</h1>
+    <p class="page-lead" id="job-lead">Loading…</p>
+
+    <section class="panel-card">
+      <div id="job-meta"></div>
+      <h3 style="margin-top:1.25rem;">Endpoint status</h3>
+      <div id="endpoint-grid" class="job-status-grid"></div>
+      <div class="form-actions" style="margin-top:1.5rem;">
+        <button id="cancel-btn" class="btn btn-danger">Cancel migration</button>
+      </div>
+    </section>
+  </main>
+
+  <footer id="page-footer" class="page-footer"></footer>
+  <script type="module" src="/js/page-migrate-job-detail.js"></script>
+</body>
+</html>

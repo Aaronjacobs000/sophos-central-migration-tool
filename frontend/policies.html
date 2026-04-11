@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Policies — Sophos Central Migration Tool</title>
+  <link rel="stylesheet" href="/css/base.css" />
+  <link rel="stylesheet" href="/css/components.css" />
+</head>
+<body>
+  <header id="app-nav" class="app-nav"></header>
+
+  <main class="page-main">
+    <h1>Endpoint policies</h1>
+    <p class="page-lead">Policies grouped by product. Source policies are on the left,
+      destination on the right. Use the checkboxes on source policies to clone selected
+      items, or click Compare on a row that exists on both sides.</p>
+
+    <div class="panel-toolbar">
+      <input type="search" id="search" placeholder="Filter by name…" />
+      <span class="spacer"></span>
+      <label class="checkbox" style="margin-top:0;">
+        <input type="checkbox" id="hide-matching" disabled />
+        Hide products where every policy fully matches
+      </label>
+      <span id="hide-matching-note" class="hint"></span>
+      <button id="refresh-match" class="btn btn-small">Refresh deep match</button>
+    </div>
+
+    <div id="content"><div class="empty-state">Loading from preload cache…</div></div>
+  </main>
+
+  <div id="selection-basket" class="selection-basket hidden">
+    <span><span id="basket-count">0</span> source policies selected</span>
+    <button id="basket-compare" class="btn">Compare</button>
+    <button id="basket-clone" class="btn btn-primary">Clone to destination</button>
+  </div>
+
+  <footer id="page-footer" class="page-footer"></footer>
+  <script type="module" src="/js/page-policies.js"></script>
+</body>
+</html>
