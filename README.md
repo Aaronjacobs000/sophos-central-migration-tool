@@ -32,7 +32,9 @@ A first-run welcome wizard walks you through either mode, tests the connection b
 - **14-day window enforcement** — devices that haven't checked in within 14 days are flagged as "stale" and cannot be selected for migration. A global toggle lets you hide stale devices entirely. The server also runs a preflight check and rejects any stale endpoints before creating jobs.
 - **Select All** — select all eligible (non-stale) devices on either side, respecting the current hostname filter.
 - **Endpoint detail modal** — click Detail on any device to see the full Sophos API response: ID, type, OS version, is-server flag, health breakdown (threats + services + individual service details), IPv4/IPv6/MAC addresses, associated person, tamper protection, isolation, lockdown, group, assigned products with versions and status, and last seen.
-- **Two-tenant migration flow** — uses the official `/endpoint/v1/migrations` API. The tool creates a receiver job on the target tenant (with `fromTenant` + `endpoints`), then a sender job on the source tenant (with `fromTenant` + `endpoints` + the handshake `token`). Both sides are polled every 10 seconds via Server-Sent Events, and per-device status is shown live in the browser.
+- **Two-tenant migration flow** — uses the official `/endpoint/v1/migrations` API. The tool POSTs a receiver job on the target tenant (with `fromTenant` + `endpoints`), then PUTs to the same job ID on the source tenant (with `token` + `endpoints`) to trigger the sender. Both sides are polled every 10 seconds via Server-Sent Events, and per-device status is shown live in the browser. Completion is derived from per-endpoint statuses (`succeeded` / `failed` / `pending`).
+- **All migrations view** — the migration jobs page queries both tenant APIs and merges the results with locally-tracked jobs. Migrations started from Sophos Central, other tools, or other workstations are visible alongside your own, with origin badges to distinguish them.
+- **Prerequisite check** — the migration page warns that Device Migration must be enabled on the sending tenant (Global Settings > Device Migration) before starting, and surfaces a specific fix message if the API returns a 403.
 - **Migration job history** — all jobs are persisted to `data/migration-jobs.json` so you can reopen a job detail page after a browser refresh or server restart. Cancel any in-flight job (deletes both upstream Sophos jobs with double confirmation).
 
 ### Partner Explorer
@@ -64,7 +66,7 @@ Available when using partner or organization credentials:
 - **Sophos Central API credentials** — either:
   - **Direct tenant mode**: a Client ID + Client Secret created in each tenant under *Global Settings > API Credentials* (Super Admin role recommended)
   - **Partner mode**: a single partner or organization API credential set that manages both tenants
-- For device migration: ensure **Device Migration is enabled** on the destination tenant in *Global Settings > Device Migration*
+- For device migration: ensure **Device Migration is enabled** on the **sending** tenant in *Global Settings > Device Migration*
 
 ## Quick start
 
@@ -87,10 +89,11 @@ PORT=3200 npm start
 
 The Sophos device migration API (`/endpoint/v1/migrations`) uses a two-tenant handshake:
 
-1. **Receiver job** — created on the target tenant with `name`, `fromTenant` (the other tenant's UUID), and `endpoints` (the device UUIDs to migrate). The response includes a handshake `token`.
-2. **Sender job** — created on the source tenant with `name`, `fromTenant` (the target tenant's UUID), `endpoints` (same device UUIDs), and `token` (from the receiver response).
-3. **Polling** — the tool polls both sides every 10 seconds and pushes status updates to the browser via Server-Sent Events. Per-device status transitions through `pending` → `migrating` → `completed` (or `failed`).
-4. **14-day window** — devices must check in with Sophos within 14 days for the migration to land. The tool enforces this at selection time (greying out stale devices) and at preflight (rejecting them server-side before creating jobs).
+1. **Enable migration** — Device Migration must be turned on in the sending tenant's Sophos Central UI (*Overview > Global Settings > Device Migration*). The tool displays a prerequisite banner and surfaces a specific error if this step is missed.
+2. **Receiver job** — `POST /endpoint/v1/migrations` on the receiving (destination) tenant with `fromTenant` (the sending tenant's UUID) and `endpoints` (the device UUIDs to migrate). The response includes the job `id` and a handshake `token`.
+3. **Sender trigger** — `PUT /endpoint/v1/migrations/{jobId}` on the sending (source) tenant using the same job ID, with `token` (from the receiver response) and `endpoints`. This triggers the migration — it does not create a separate job.
+4. **Polling** — the tool polls both sides every 10 seconds and pushes status updates to the browser via Server-Sent Events. Per-endpoint status transitions through `pending` → `succeeded` (or `failed`). Aggregate job status is derived from endpoint-level results since the Sophos API does not populate a top-level job status field.
+5. **14-day window** — devices must check in with Sophos within 14 days for the migration to land. The tool enforces this at selection time (greying out stale devices) and at preflight (rejecting them server-side before creating jobs).
 
 The tool handles both directions (source→dest and dest→source) for cases where you need to move a device back.
 
