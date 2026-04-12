@@ -925,6 +925,52 @@
 .logs-table tr.log-level-error td.log-message { color: #ffaaaa; }
 .logs-table tr.log-level-warn td.log-message { color: #ffd089; }
 
+/* Tab bar (migration jobs page) */
+.tab-bar {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border-default);
+  margin-bottom: 1rem;
+}
+.tab-btn {
+  padding: 0.65rem 1.1rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  font-family: var(--font-sans);
+  font-weight: 500;
+  transition: color 0.15s var(--easing-default);
+}
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active {
+  color: var(--text-strong);
+  border-bottom-color: var(--sophos-primary-bright);
+}
+
+/* Origin pills (migration jobs table) */
+.origin-pill {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  border: 1px solid transparent;
+}
+.origin-local {
+  background: rgba(54, 145, 227, 0.14);
+  color: #8fc3f1;
+  border-color: rgba(54, 145, 227, 0.35);
+}
+.origin-api {
+  background: rgba(177, 102, 220, 0.14);
+  color: #d6a8f0;
+  border-color: rgba(177, 102, 220, 0.35);
+}
+
 /* Migration job status grid */
 .job-status-grid {
   display: grid;
@@ -944,6 +990,17 @@
   color: var(--text-strong);
 }
 .job-status-cell .state { color: var(--text-muted); }
+.job-status-cell .state.ep-ok { color: var(--status-ok); }
+.job-status-cell .state.ep-fail { color: var(--status-error); }
+.job-status-cell .ep-error {
+  color: #ff8c8c;
+  font-size: 0.72rem;
+  margin-top: 0.15rem;
+}
+.job-status-error {
+  border-color: rgba(240, 71, 71, 0.4);
+  background: rgba(240, 71, 71, 0.06);
+}
 
 /* Selection basket */
 .selection-basket {

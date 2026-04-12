@@ -1,12 +1,13 @@
 /**
  * Two-tenant device migration orchestration.
  *
- * Workflow:
+ * Workflow (matches Sophos docs):
  *   1. Preflight: read each selected source endpoint, reject any that
  *      haven't checked in within the last 14 days.
- *   2. Create receiving job on DESTINATION → returns id + token.
- *   3. Create sending job on SOURCE with the dest token + endpoint IDs.
- *   4. Persist both job IDs to data/migration-jobs.json.
+ *   2. POST receiver job on DESTINATION → returns job id + handshake token.
+ *   3. PUT sender trigger on SOURCE using the SAME job id + token.
+ *      (This is NOT a second POST — it triggers the existing job.)
+ *   4. Persist the job ID to data/migration-jobs.json.
  *   5. UI subscribes via SSE to /api/migrate/devices/jobs/:id/stream.
  */
 
@@ -15,7 +16,8 @@ import {
   getEndpoint,
 } from "../sophos/api/endpoints.js";
 import {
-  createMigrationJob,
+  createReceiverJob,
+  triggerSenderJob,
   deleteMigrationJob,
   getMigrationJob,
   listMigrationJobEndpoints,
@@ -57,8 +59,8 @@ export interface StartMigrationResult {
     sourceApiHost: string;
     destTenantId: string;
     destApiHost: string;
-    receiverBody: { name: string; fromTenant: string; endpoints: string[] };
-    senderBody: { name: string; fromTenant: string; endpoints: string[]; token: string };
+    receiverBody: { fromTenant: string; endpoints: string[] };
+    senderTrigger: { method: string; endpoints: string[]; token: string };
   };
   /** Present in real run: the persisted local job. */
   job?: LocalMigrationJob;
@@ -134,13 +136,11 @@ export async function startMigration(
         destTenantId: to.tenantId,
         destApiHost: to.summary.apiHost,
         receiverBody: {
-          name: req.jobName,
           fromTenant: from.tenantId,
           endpoints: endpointIds,
         },
-        senderBody: {
-          name: req.jobName,
-          fromTenant: to.tenantId,
+        senderTrigger: {
+          method: "PUT /endpoint/v1/migrations/{receiverJobId}",
           endpoints: endpointIds,
           token: "<would be returned by receiver job>",
         },
@@ -148,14 +148,21 @@ export async function startMigration(
     };
   }
 
-  // Step 2 — create receiver on the "to" side.
-  // Sophos requires: name + fromTenant (who's sending) + endpoints (which devices).
-  const receiver = await createMigrationJob(to.client, to.tenantId, {
-    name: req.jobName,
+  // Step 2 — POST receiver job on the destination tenant.
+  // fromTenant = the sending tenant (where endpoints currently live).
+  const receiverBody = {
     fromTenant: from.tenantId,
     endpoints: endpointIds,
+  };
+  log.emit("info", "migration", `Creating receiver job on ${to.label} (${to.tenantId})`, {
+    side: to.label as "source" | "dest",
+    detail: { body: receiverBody },
   });
-  // Sophos returns the handshake token as `token` (not `fromToken`).
+  const receiver = await createReceiverJob(to.client, to.tenantId, receiverBody);
+  log.emit("info", "migration", `Receiver job created: id=${receiver.id}, mode=${(receiver as any).mode}`, {
+    side: to.label as "source" | "dest",
+    detail: { response: receiver },
+  });
   const handshakeToken = (receiver as any).token ?? receiver.fromToken;
   if (!handshakeToken) {
     throw new Error("Receiver job did not return a handshake token");
@@ -170,20 +177,23 @@ export async function startMigration(
     detail: { jobName: req.jobName, direction },
   });
 
-  // Step 3 — create sender on the "from" side.
-  // Sophos requires: name + fromTenant (where devices go) + endpoints + token.
+  // Step 3 — PUT sender trigger on the source tenant.
+  // Uses the SAME job ID from the receiver. Body is just { token, endpoints }.
   const senderBody = {
-    name: req.jobName,
-    fromTenant: to.tenantId,
-    endpoints: endpointIds,
     token: handshakeToken,
+    endpoints: endpointIds,
   };
-  log.emit("info", "migration", `Creating sender job: ${endpointIds.length} endpoint(s), fromTenant=${to.tenantId}`, {
+  log.emit("info", "migration", `Triggering sender on ${from.label} (${from.tenantId}), jobId=${receiver.id}`, {
     side: from.label as "source" | "dest",
+    detail: { jobId: receiver.id, endpointCount: endpointIds.length },
   });
   let sender;
   try {
-    sender = await createMigrationJob(from.client, from.tenantId, senderBody);
+    sender = await triggerSenderJob(from.client, from.tenantId, receiver.id, senderBody);
+    log.emit("info", "migration", `Sender triggered: id=${sender.id}, mode=${(sender as any).mode}`, {
+      side: from.label as "source" | "dest",
+      detail: { response: sender },
+    });
     await audit({
       side: from.label,
       tenantId: from.tenantId,
@@ -203,7 +213,8 @@ export async function startMigration(
     throw err;
   }
 
-  // Step 4 — persist locally
+  // Step 4 — persist locally.
+  // The migration job ID is shared across both tenants (same ID).
   const job = await createJob({
     jobName: req.jobName,
     sourceMigrationId: sender.id,
@@ -237,8 +248,18 @@ export async function pollJob(localJobId: string): Promise<LocalMigrationJob | n
     safe(() => listMigrationJobEndpoints(dst.client, dst.tenantId, job.destMigrationId)),
   ]);
 
-  // Decide aggregate status
-  const status = aggregateStatus(srcJob.value, dstJob.value, job.status);
+  // Decide aggregate status from job-level AND endpoint-level data.
+  const allEndpoints = [
+    ...(srcEndpoints.value ?? []),
+    ...(dstEndpoints.value ?? []),
+  ];
+  const status = aggregateStatus(
+    srcJob.value,
+    dstJob.value,
+    allEndpoints,
+    job.endpointIds.length,
+    job.status,
+  );
 
   const updated = await updateJob(localJobId, {
     sourceSnapshot: srcJob.value
@@ -302,28 +323,56 @@ export async function purgeJob(localJobId: string): Promise<void> {
   await deleteJob(localJobId);
 }
 
+/**
+ * Determine the aggregate migration status from job-level and endpoint-level
+ * data. The Sophos API doesn't always populate a top-level job status, so
+ * endpoint-level statuses are the most reliable signal.
+ */
 function aggregateStatus(
   src: { status?: string } | null,
   dst: { status?: string } | null,
+  endpoints: Array<{ status?: string }>,
+  expectedCount: number,
   current: LocalMigrationJob["status"],
 ): LocalMigrationJob["status"] {
   if (current === "cancelled") return "cancelled";
+
+  const isMatch = (value: string, tokens: string[]) =>
+    tokens.some((t) => value.includes(t));
+
+  const failedTokens = ["failed", "error"];
+  const completeTokens = ["complete", "completed", "succeeded", "migrated"];
+
+  // 1. Check job-level status first (some API versions do populate it)
   const s = (src?.status ?? "").toLowerCase();
   const d = (dst?.status ?? "").toLowerCase();
 
-  const failedTokens = ["failed", "error"];
-  const completeTokens = ["complete", "completed", "succeeded"];
-  const partialTokens = ["partial", "partiallycomplete"];
-
-  if (failedTokens.some((t) => s.includes(t)) || failedTokens.some((t) => d.includes(t))) {
+  if (isMatch(s, failedTokens) || isMatch(d, failedTokens)) {
     return "failed";
   }
-  if (partialTokens.some((t) => s.includes(t)) || partialTokens.some((t) => d.includes(t))) {
-    return "partially-complete";
-  }
-  if (completeTokens.some((t) => s.includes(t)) && completeTokens.some((t) => d.includes(t))) {
+  if (isMatch(s, completeTokens) && isMatch(d, completeTokens)) {
     return "complete";
   }
+
+  // 2. Fall back to endpoint-level statuses (the reliable signal).
+  //    Deduplicate by looking at both source and dest endpoint lists.
+  //    Each endpoint appears in both, so count distinct statuses.
+  const epStatuses = endpoints.map((e) => (e.status ?? "").toLowerCase());
+  const succeeded = epStatuses.filter((s) => isMatch(s, completeTokens)).length;
+  const failed = epStatuses.filter((s) => isMatch(s, failedTokens)).length;
+  const pending = epStatuses.filter((s) => s === "pending" || s === "").length;
+
+  // Both sender and receiver report per-endpoint status, so a single
+  // endpoint shows up twice (once on each side). Use the endpoint count
+  // from the local job as ground truth.
+  // If every endpoint succeeded on at least one side, the migration worked.
+  if (succeeded > 0 && failed === 0 && pending === 0) {
+    return "complete";
+  }
+  if (failed > 0 && pending === 0) {
+    return succeeded > 0 ? "partially-complete" : "failed";
+  }
+
   return "in-progress";
 }
 

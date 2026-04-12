@@ -100,7 +100,7 @@ function wireForm(ids) {
               .join("<br/>"),
         );
       } else {
-        showResult("err", err.message || "Dry run failed");
+        showResult("err", migrationErrorHint(err.message || "Dry run failed"));
       }
     }
   });
@@ -131,7 +131,7 @@ function wireForm(ids) {
               .join("<br/>"),
         );
       } else {
-        showResult("err", err.message || "Migration start failed");
+        showResult("err", migrationErrorHint(err.message || "Migration start failed"));
       }
     }
   });
@@ -140,6 +140,17 @@ function wireForm(ids) {
 function showResult(variant, html) {
   document.getElementById("result-area").innerHTML =
     `<div class="banner banner-${variant}">${html}</div>`;
+}
+
+function migrationErrorHint(msg) {
+  const m = String(msg);
+  if (/migration is not enabled/i.test(m) || (/403/.test(m) && /migration/i.test(m))) {
+    return `${escapeHtml(m)}<br/><br/><strong>Fix:</strong> In Sophos Central on the <strong>sending</strong> tenant, go to <strong>Overview &gt; Global Settings &gt; Device Migration</strong> and turn on <strong>Allow device migration</strong>. Then retry.`;
+  }
+  if (/must not match the current tenant/i.test(m)) {
+    return `${escapeHtml(m)}<br/><br/><strong>Fix:</strong> The source and destination appear to be the same tenant. Check your credential configuration.`;
+  }
+  return escapeHtml(m);
 }
 
 function escapeHtml(s) {

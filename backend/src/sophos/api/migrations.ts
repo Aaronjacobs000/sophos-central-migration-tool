@@ -2,12 +2,18 @@
  * Sophos /endpoint/v1/migrations wrappers — the actual two-tenant device
  * migration API.
  *
- * Verified against the live API 2026-04-11. Key learnings:
- *   - BOTH receiver and sender requests require `endpoints` (UUID array)
- *     and `fromTenant` (the other tenant's UUID).
- *   - The handshake token is returned in the response as `token`, not
- *     `fromToken`.
- *   - The sender body uses `token` (the value from the receiver response).
+ * API flow (from Sophos docs):
+ *   1. POST /endpoint/v1/migrations on the RECEIVING tenant
+ *      Body: { fromTenant, endpoints }
+ *      → returns job with id + token
+ *   2. PUT /endpoint/v1/migrations/{jobId} on the SENDING tenant
+ *      Body: { token, endpoints }
+ *      → triggers the migration, returns same job id with mode "sending"
+ *   3. GET /endpoint/v1/migrations/{jobId}/endpoints on either tenant
+ *      → per-endpoint status
+ *
+ * The sender does NOT create a new job — it triggers the existing receiver
+ * job via PUT using the same migration job ID.
  */
 
 import type { SophosClient } from "../client/sophos-client.js";
@@ -50,35 +56,53 @@ export async function getMigrationJob(
   );
 }
 
-/** Body for creating a RECEIVER job on the destination tenant. */
-export interface CreateReceiverJobBody {
-  name: string;
-  /** The tenant ID devices are being migrated FROM. */
+/** Body for creating a receiver job (POST) on the destination tenant. */
+export interface CreateReceiverBody {
+  /** The sending tenant's ID (where endpoints currently live). */
   fromTenant: string;
-  /** The endpoint UUIDs being migrated — required by Sophos on both sides. */
+  /** The endpoint UUIDs to migrate. */
   endpoints: string[];
 }
 
-/** Body for creating a SENDER job on the source tenant. */
-export interface CreateSenderJobBody {
-  name: string;
-  /** The tenant ID devices are being migrated TO. */
-  fromTenant: string;
-  /** The endpoint UUIDs being migrated. */
-  endpoints: string[];
-  /** The handshake token from the receiver job response (`token` field). */
+/** Body for triggering the sender (PUT) on the source tenant. */
+export interface TriggerSenderBody {
+  /** The handshake token from the receiver job response. */
   token: string;
+  /** The endpoint UUIDs eligible for migration. */
+  endpoints: string[];
 }
 
-export async function createMigrationJob(
+/**
+ * Step 2: Create a receiver migration job on the destination tenant.
+ * POST /endpoint/v1/migrations
+ */
+export async function createReceiverJob(
   client: SophosClient,
   tenantId: string,
-  body: CreateReceiverJobBody | CreateSenderJobBody,
+  body: CreateReceiverBody,
 ): Promise<SophosMigrationJob> {
   return client.tenantRequest<SophosMigrationJob>(tenantId, MIGRATIONS_PATH, {
     method: "POST",
     body,
   });
+}
+
+/**
+ * Step 3: Trigger the migration from the sending tenant.
+ * PUT /endpoint/v1/migrations/{jobId}
+ * Uses the SAME job ID returned by createReceiverJob.
+ */
+export async function triggerSenderJob(
+  client: SophosClient,
+  tenantId: string,
+  jobId: string,
+  body: TriggerSenderBody,
+): Promise<SophosMigrationJob> {
+  return client.tenantRequest<SophosMigrationJob>(
+    tenantId,
+    `${MIGRATIONS_PATH}/${jobId}`,
+    { method: "PUT", body },
+  );
 }
 
 export async function deleteMigrationJob(

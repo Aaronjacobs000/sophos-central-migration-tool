@@ -2,6 +2,7 @@
  * Routes for the two-tenant device migration flow.
  *   POST   /api/migrate/devices                — start a job
  *   GET    /api/migrate/devices/jobs            — list local jobs
+ *   GET    /api/migrate/devices/jobs/all        — merged local + API jobs
  *   GET    /api/migrate/devices/jobs/:id        — single job detail
  *   GET    /api/migrate/devices/jobs/:id/stream — SSE live updates
  *   DELETE /api/migrate/devices/jobs/:id        — cancel + purge
@@ -16,6 +17,10 @@ import {
   purgeJob,
 } from "../services/device-migrator.js";
 import { listJobs, getJob } from "../services/migration-store.js";
+import { listMigrationJobs } from "../sophos/api/migrations.js";
+import { requireContext } from "../state.js";
+import type { SophosMigrationJob } from "../sophos/types/migration.js";
+import type { LocalMigrationJob } from "../services/migration-store.js";
 
 export const migrateDevicesRouter = Router();
 
@@ -66,6 +71,77 @@ migrateDevicesRouter.get("/migrate/devices/jobs", async (_req, res, next) => {
   }
 });
 
+/**
+ * Merged view: local jobs + all migration jobs from both tenants' APIs.
+ * API-only jobs (triggered outside this tool) are included so users can
+ * see the full picture of what's been requested across any platform.
+ */
+migrateDevicesRouter.get("/migrate/devices/jobs/all", async (_req, res, next) => {
+  try {
+    const src = requireContext("source");
+    const dst = requireContext("dest");
+
+    const [localJobs, srcApiJobs, dstApiJobs] = await Promise.all([
+      listJobs(),
+      listMigrationJobs(src.client, src.tenantId).catch((): SophosMigrationJob[] => []),
+      listMigrationJobs(dst.client, dst.tenantId).catch((): SophosMigrationJob[] => []),
+    ]);
+
+    // Index local jobs by their upstream Sophos migration IDs for correlation
+    const localBySourceId = new Map<string, LocalMigrationJob>();
+    const localByDestId = new Map<string, LocalMigrationJob>();
+    for (const lj of localJobs) {
+      localBySourceId.set(lj.sourceMigrationId, lj);
+      localByDestId.set(lj.destMigrationId, lj);
+    }
+
+    // Track which API job IDs are already covered by a local job
+    const coveredApiIds = new Set<string>();
+    const merged: MergedMigrationJob[] = [];
+
+    // 1. Start with all local jobs — they get full detail
+    for (const lj of localJobs) {
+      coveredApiIds.add(lj.sourceMigrationId);
+      coveredApiIds.add(lj.destMigrationId);
+      merged.push({
+        origin: "local",
+        localJobId: lj.localJobId,
+        jobName: lj.jobName,
+        status: lj.status,
+        direction: lj.direction,
+        endpointCount: lj.endpointIds.length,
+        createdAt: lj.createdAt,
+        sourceMigrationId: lj.sourceMigrationId,
+        destMigrationId: lj.destMigrationId,
+        sourceSnapshot: lj.sourceSnapshot,
+        destSnapshot: lj.destSnapshot,
+        lastPolledAt: lj.lastPolledAt,
+      });
+    }
+
+    // 2. Add API-only jobs from the source tenant
+    for (const aj of srcApiJobs) {
+      if (coveredApiIds.has(aj.id)) continue;
+      coveredApiIds.add(aj.id);
+      merged.push(apiJobToMerged(aj, "source", src.summary.displayName));
+    }
+
+    // 3. Add API-only jobs from the dest tenant
+    for (const aj of dstApiJobs) {
+      if (coveredApiIds.has(aj.id)) continue;
+      coveredApiIds.add(aj.id);
+      merged.push(apiJobToMerged(aj, "dest", dst.summary.displayName));
+    }
+
+    // Sort newest first
+    merged.sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+
+    res.json({ items: merged });
+  } catch (err) {
+    next(err);
+  }
+});
+
 migrateDevicesRouter.get("/migrate/devices/jobs/:id", async (req, res, next) => {
   try {
     const job = await getJob(req.params.id!);
@@ -95,7 +171,16 @@ migrateDevicesRouter.delete("/migrate/devices/jobs/:id", async (req, res, next) 
 
 migrateDevicesRouter.get("/migrate/devices/jobs/:id/stream", async (req, res) => {
   const jobId = req.params.id!;
-  const job = await getJob(jobId);
+  let job;
+  try {
+    job = await getJob(jobId);
+  } catch (err) {
+    res.status(500).json({
+      error: "store_read_failed",
+      message: err instanceof Error ? err.message : String(err),
+    });
+    return;
+  }
   if (!job) {
     res.status(404).json({ error: "not_found" });
     return;
@@ -150,3 +235,47 @@ migrateDevicesRouter.get("/migrate/devices/jobs/:id/stream", async (req, res) =>
     cancelled = true;
   });
 });
+
+// --- Merged job type used by the /all endpoint ---
+
+export interface MergedMigrationJob {
+  /** "local" = created by this tool; "api" = discovered from the Sophos API */
+  origin: "local" | "api";
+  localJobId?: string;
+  jobName: string;
+  status: string;
+  direction?: string;
+  endpointCount?: number;
+  createdAt?: string;
+  sourceMigrationId?: string;
+  destMigrationId?: string;
+  sourceSnapshot?: SophosMigrationJob | null;
+  destSnapshot?: SophosMigrationJob | null;
+  lastPolledAt?: string;
+  /** For API-only jobs: which tenant ("source" or "dest") reported this job */
+  apiTenant?: string;
+  /** For API-only jobs: the display name of the tenant */
+  apiTenantName?: string | null;
+  /** For API-only jobs: the Sophos migration ID */
+  apiMigrationId?: string;
+  /** For API-only jobs: sender or receiver */
+  apiJobMode?: string;
+}
+
+function apiJobToMerged(
+  aj: SophosMigrationJob,
+  tenant: "source" | "dest",
+  tenantName: string | null | undefined,
+): MergedMigrationJob {
+  return {
+    origin: "api",
+    jobName: aj.name || `API job ${aj.id.slice(0, 8)}`,
+    status: aj.status ?? "unknown",
+    endpointCount: aj.endpointCounts?.total ?? undefined,
+    createdAt: aj.createdAt,
+    apiTenant: tenant,
+    apiTenantName: tenantName ?? null,
+    apiMigrationId: aj.id,
+    apiJobMode: aj.mode ?? aj.type ?? undefined,
+  };
+}

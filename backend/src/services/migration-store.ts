@@ -4,12 +4,17 @@
  * of the last polled state, so the UI can resume monitoring after restart.
  *
  * Stored as a single JSON file at data/migration-jobs.json.
+ *
+ * File operations retry on EBUSY / EPERM — OneDrive (and other cloud-sync
+ * tools) briefly lock files during upload, which causes transient failures
+ * on Windows.
  */
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { getState } from "../state.js";
+import { log } from "../log.js";
 import type { SophosMigrationJob } from "../sophos/types/migration.js";
 
 export interface LocalMigrationJob {
@@ -36,9 +41,31 @@ function jobsFile(): string {
   return path.join(getState().repoRoot, "data", "migration-jobs.json");
 }
 
+/** Codes that indicate a transient file lock (OneDrive, antivirus, etc.). */
+const RETRYABLE_CODES = new Set(["EBUSY", "EPERM", "EACCES"]);
+const MAX_RETRIES = 5;
+const BASE_DELAY_MS = 150;
+
+async function withRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code && RETRYABLE_CODES.has(code) && attempt < MAX_RETRIES) {
+        const delay = BASE_DELAY_MS * Math.pow(2, attempt);
+        log.emit("warn", "migration-store", `${label}: ${code}, retry ${attempt + 1}/${MAX_RETRIES} in ${delay}ms`);
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 async function readAll(): Promise<LocalMigrationJob[]> {
   try {
-    const raw = await fs.readFile(jobsFile(), "utf8");
+    const raw = await withRetry("readAll", () => fs.readFile(jobsFile(), "utf8"));
     return JSON.parse(raw) as LocalMigrationJob[];
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
@@ -50,9 +77,11 @@ async function writeAll(jobs: LocalMigrationJob[]): Promise<void> {
   const file = jobsFile();
   const dir = path.dirname(file);
   await fs.mkdir(dir, { recursive: true });
-  const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
-  await fs.writeFile(tmp, JSON.stringify(jobs, null, 2), "utf8");
-  await fs.rename(tmp, file);
+  await withRetry("writeAll", async () => {
+    // Write directly instead of tmp+rename — OneDrive can lock the target
+    // during sync, which makes the rename fail even if the write succeeds.
+    await fs.writeFile(file, JSON.stringify(jobs, null, 2), "utf8");
+  });
 }
 
 export async function listJobs(): Promise<LocalMigrationJob[]> {

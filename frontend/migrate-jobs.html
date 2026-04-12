@@ -12,7 +12,12 @@
 
   <main class="page-main">
     <h1>Migration jobs</h1>
-    <p class="page-lead">All device migration jobs you've started from this workstation.</p>
+    <p class="page-lead">Device migration jobs across both tenants.</p>
+
+    <div class="tab-bar" id="jobs-tabs">
+      <button class="tab-btn active" data-tab="all">All migrations</button>
+      <button class="tab-btn" data-tab="local">This workstation</button>
+    </div>
 
     <section class="panel-card">
       <div id="jobs-list"><div class="empty-state">Loading…</div></div>
