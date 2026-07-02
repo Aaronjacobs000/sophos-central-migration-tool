@@ -13,11 +13,13 @@ import {
   createUserGroup,
   deleteUserGroup,
 } from "../sophos/api/user-groups.js";
+import { listUsers } from "../sophos/api/users.js";
 
 export const groupsRouter = Router();
 
 groupsRouter.use("/:side/groups", requireConfigured, sideParam);
 groupsRouter.use("/:side/user-groups", requireConfigured, sideParam);
+groupsRouter.use("/:side/users", requireConfigured, sideParam);
 
 groupsRouter.get("/:side/groups", async (_req, res, next) => {
   try {
@@ -96,6 +98,18 @@ groupsRouter.delete("/:side/user-groups/:id", async (req, res, next) => {
     const ctx = res.locals.tenantContext!;
     await deleteUserGroup(ctx.client, ctx.tenantId, req.params.id!);
     res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+// --- Directory users (read-only, used for assignment name resolution) ---
+
+groupsRouter.get("/:side/users", async (_req, res, next) => {
+  try {
+    const ctx = res.locals.tenantContext!;
+    const items = await listUsers(ctx.client, ctx.tenantId);
+    res.json({ items });
   } catch (err) {
     next(err);
   }

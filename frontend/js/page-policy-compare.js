@@ -72,7 +72,7 @@ function renderHeader() {
           ${state.destPolicy ? `<span class="hint">matched by name + type</span>` : `<span class="diff-pill diff-pill-add">no destination match</span>`}
         </div>
       </div>
-      <div class="form-actions" style="margin-top:0;">
+      <div class="form-actions" style="margin-top:0; display:flex; align-items:center; gap:0.75rem;">
         <button id="clone-btn" class="btn btn-primary">${escapeHtml(cloneLabel)}</button>
       </div>
     </header>
@@ -175,8 +175,13 @@ async function cloneToDest() {
       overwrite: !!state.destPolicy,
     });
     const ok = res.results?.filter((r) => r.ok).length ?? 0;
+    let suffix = "";
+    const adjustments = res.results?.[0]?.adjustments;
+    if (adjustments?.length) {
+      suffix += ` ${adjustments.length} setting${adjustments.length === 1 ? "" : "s"} adjusted for destination.`;
+    }
     if (ok > 0) {
-      toast("Policy migrated. Re-running compare…", "ok");
+      toast(`Policy migrated.${suffix} Re-running compare…`, "ok");
       // Re-fetch the comparison so the user sees the new state
       setTimeout(() => window.location.reload(), 800);
     } else {

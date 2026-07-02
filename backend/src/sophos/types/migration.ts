@@ -15,11 +15,16 @@ export interface SophosPolicy {
   enabled?: boolean;
   priority?: number;
   enforced?: boolean;
+  /**
+   * The live API returns assignment references as plain UUID strings
+   * (e.g. `endpointGroups: ["5517…"]`), not `{ id }` objects. Accept both
+   * shapes on read; writes always use plain strings to mirror the GET shape.
+   */
   appliesTo?: {
-    users?: Array<{ id: string }>;
-    userGroups?: Array<{ id: string }>;
-    endpoints?: Array<{ id: string }>;
-    endpointGroups?: Array<{ id: string }>;
+    users?: Array<string | { id: string }>;
+    userGroups?: Array<string | { id: string }>;
+    endpoints?: Array<string | { id: string }>;
+    endpointGroups?: Array<string | { id: string }>;
   };
   settings?: Record<string, unknown>;
   lockedByManagingAccount?: boolean;

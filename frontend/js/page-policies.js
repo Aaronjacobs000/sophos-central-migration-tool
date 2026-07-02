@@ -10,7 +10,10 @@ const PRODUCT_LABELS = {
   "threat-protection": "Threat Protection",
   "server-threat-protection": "Server Threat Protection",
   "peripheral-control": "Peripheral Control",
+  "server-peripheral-control": "Server Peripheral Control",
   "application-control": "Application Control",
+  "server-application-control": "Server Application Control",
+  "server-web-control": "Server Web Control",
   "data-loss-prevention": "Data Loss Prevention",
   "web-control": "Web Control",
   "update-management": "Update Management",
@@ -23,6 +26,22 @@ const PRODUCT_LABELS = {
   "exploit-mitigation": "Exploit Mitigation",
   "wireless": "Wireless",
 };
+
+// Policy types whose `appliesTo` assignments are exported, mirroring
+// scripts/export-policy-assignments.mjs. Server policies are distinct types
+// in the API, so both the endpoint and server variants are included.
+const ASSIGNMENT_POLICY_TYPES = [
+  "peripheral-control",
+  "application-control",
+  "server-peripheral-control",
+  "server-application-control",
+];
+
+// CSV columns — identical to the standalone export script.
+const ASSIGNMENT_CSV_HEADER = [
+  "policy_name", "policy_type", "enabled", "priority",
+  "assignee_kind", "assignee_name", "assignee_id",
+];
 
 const state = {
   source: [],
@@ -136,6 +155,7 @@ function wireToolbar() {
   document.getElementById("refresh-match").addEventListener("click", () => {
     loadDeepMatch(true);
   });
+  document.getElementById("export-assignments").addEventListener("click", exportAssignments);
   document.getElementById("hide-matching").disabled = true;
   updateToggleState();
 }
@@ -451,10 +471,12 @@ function wireRows() {
       const id = e.target.dataset.clone;
       if (!confirm("Clone this policy to destination?")) return;
       try {
-        const res = await api.post("/api/migrate/policies", { policyIds: [id] });
+        const res = await api.post("/api/migrate/policies", {
+          policyIds: [id],
+        });
         const ok = res.results?.filter((r) => r.ok).length ?? 0;
         const failed = res.results?.filter((r) => !r.ok).length ?? 0;
-        toast(`Cloned ${ok} / failed ${failed}`, failed ? "err" : "ok");
+        toast(`Cloned ${ok} / failed ${failed}${summarizeAssignments(res.results)}`, failed ? "err" : "ok");
         await refreshSection("dest", "policies").catch(() => {});
         await loadSide("dest");
         loadDeepMatch(true);
@@ -506,10 +528,12 @@ function wireBasket() {
     if (ids.length === 0) return;
     if (!confirm(`Clone ${ids.length} polic${ids.length === 1 ? "y" : "ies"} from source to destination?`)) return;
     try {
-      const res = await api.post("/api/migrate/policies", { policyIds: ids });
+      const res = await api.post("/api/migrate/policies", {
+        policyIds: ids,
+      });
       const ok = res.results?.filter((r) => r.ok).length ?? 0;
       const failed = res.results?.filter((r) => !r.ok).length ?? 0;
-      toast(`Cloned ${ok} / failed ${failed}`, failed ? "err" : "ok");
+      toast(`Cloned ${ok} / failed ${failed}${summarizeAssignments(res.results)}`, failed ? "err" : "ok");
       state.selectedSource.clear();
       renderBasket();
       await refreshSection("dest", "policies").catch(() => {});
@@ -520,6 +544,138 @@ function wireBasket() {
       toast(err.message || "Clone failed", "err");
     }
   });
+}
+
+/**
+ * Build a short " · assignments: N mapped, M skipped" suffix from migration
+ * results. Returns "" when assignment migration wasn't requested (no policy
+ * result carries an `assignments` report).
+ */
+function summarizeAssignments(results) {
+  // Settings the migrator changed/dropped to fit the destination (full detail
+  // is in the API response and the audit log).
+  const adjusted = (results ?? []).flatMap((r) => r.adjustments ?? []);
+  if (adjusted.length === 0) return "";
+  return ` · ${adjusted.length} setting${adjusted.length === 1 ? "" : "s"} adjusted for destination`;
+}
+
+/**
+ * Export Peripheral Control + Application Control policy assignments (source
+ * tenant) to a CSV download. Mirrors scripts/export-policy-assignments.mjs:
+ * for each policy it expands `appliesTo` into one row per assigned user, user
+ * group, endpoint or endpoint group (or a single "none" row when unassigned),
+ * resolving IDs to names. Source policies are already loaded in state.source.
+ */
+async function exportAssignments() {
+  const btn = document.getElementById("export-assignments");
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Building CSV…";
+  try {
+    const sourcePolicies = Array.isArray(state.source) ? state.source : [];
+    const policies = sourcePolicies.filter((p) =>
+      ASSIGNMENT_POLICY_TYPES.includes(p.type),
+    );
+    if (policies.length === 0) {
+      toast("No Peripheral Control or Application Control policies on the source tenant.", "info");
+      return;
+    }
+
+    const resolve = await buildAssignmentNameResolver();
+
+    const rows = [ASSIGNMENT_CSV_HEADER];
+    for (const p of policies) {
+      const a = p.appliesTo ?? {};
+      const groups = [
+        ["user", a.users],
+        ["user_group", a.userGroups],
+        ["endpoint", a.endpoints],
+        ["endpoint_group", a.endpointGroups],
+      ];
+      let any = false;
+      for (const [kind, list] of groups) {
+        for (const ref of list ?? []) {
+          any = true;
+          // The API returns refs as plain UUID strings; tolerate `{ id }` too.
+          const refId = typeof ref === "string" ? ref : ref.id;
+          rows.push([p.name, p.type, p.enabled ?? "", p.priority ?? "", kind, resolve(refId), refId]);
+        }
+      }
+      if (!any) {
+        rows.push([p.name, p.type, p.enabled ?? "", p.priority ?? "", "none", "", ""]);
+      }
+    }
+
+    const csv = rows.map((r) => r.map(csvCell).join(",")).join("\n") + "\n";
+    downloadCsv(csv, "policy-assignments.csv");
+    const policyWord = policies.length === 1 ? "policy" : "policies";
+    toast(`Exported ${policies.length} ${policyWord} to policy-assignments.csv`, "ok");
+  } catch (err) {
+    toast(err.message || "Export failed", "err");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+}
+
+/**
+ * Build an id -> name resolver for assignment targets on the source tenant.
+ * Reuses the preload cache for endpoints and endpoint groups; user groups and
+ * directory users are fetched on demand (not preloaded). Any source that fails
+ * to load is skipped — unresolved IDs fall back to the raw ID.
+ */
+async function buildAssignmentNameResolver() {
+  const [endpoints, endpointGroups, userGroups, users] = await Promise.all([
+    loadResolverItems("endpoints", "/api/source/endpoints"),
+    loadResolverItems("groups", "/api/source/groups"),
+    fetchResolverItems("/api/source/user-groups"),
+    fetchResolverItems("/api/source/users"),
+  ]);
+
+  const nameMap = new Map();
+  for (const u of users) nameMap.set(u.id, u.name ?? u.email ?? u.id);
+  for (const g of userGroups) nameMap.set(g.id, g.name ?? g.id);
+  for (const e of endpoints) nameMap.set(e.id, e.hostname ?? e.id);
+  for (const g of endpointGroups) nameMap.set(g.id, g.name ?? g.id);
+
+  return (id) => nameMap.get(id) ?? id;
+}
+
+// Prefer preloaded data for a section; fall back to a direct API fetch.
+async function loadResolverItems(section, fallbackPath) {
+  try {
+    const cached = await getCachedSection("source", section);
+    if (cached.status?.state === "ok") return cached.items || [];
+  } catch {
+    // Fall through to the direct fetch below.
+  }
+  return fetchResolverItems(fallbackPath);
+}
+
+async function fetchResolverItems(path) {
+  try {
+    const res = await api.get(path);
+    return res.items || [];
+  } catch {
+    return [];
+  }
+}
+
+function csvCell(v) {
+  const s = v == null ? "" : String(v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function downloadCsv(text, filename) {
+  const blob = new Blob([text], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 function escapeHtml(s) {

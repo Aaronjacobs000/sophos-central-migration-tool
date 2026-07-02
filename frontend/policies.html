@@ -18,6 +18,8 @@
 
     <div class="panel-toolbar">
       <input type="search" id="search" placeholder="Filter by name…" />
+      <button id="export-assignments" class="btn btn-small"
+        title="Export Peripheral Control and Application Control policy assignments (source tenant, endpoint + server variants) to CSV. Assignments cannot be migrated: the Sophos Central API does not accept assignment writes, so use this export to re-assign manually in the destination.">Export assignments (CSV)</button>
       <span class="spacer"></span>
       <label class="checkbox" style="margin-top:0;">
         <input type="checkbox" id="hide-matching" disabled />
