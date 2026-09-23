@@ -1,6 +1,6 @@
 /**
  * Vendored from sophos-central-mcp @ 1b10f6d3aa3f2d5ed3dce70533688b2a0f4dbe4d
- * Upstream: https://github.com/Aaronjacobs000/sophos-central-mcp/blob/main/src/types/sophos.ts
+ * Upstream: https://github.com/Aaronjacobs000/sophos-mcp/blob/main/src/types/sophos.ts
  * License: MIT
  *
  * TypeScript type definitions for Sophos Central API responses.

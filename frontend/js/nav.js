@@ -40,8 +40,8 @@ export function renderNav(status = null) {
 
   mount.innerHTML = `
     <div class="nav-brand">
-      <img class="brand-logo" src="/sophos-logo-white.svg" alt="Sophos" />
-      <span class="brand-title">Central Migration Tool</span>
+      <svg class="brand-mark" viewBox="0 0 32 32" fill="none" aria-hidden="true"><rect x="2.5" y="15.5" width="12" height="12" rx="3.5" stroke="currentColor" stroke-width="2.4" opacity="0.55"/><rect x="17.5" y="4.5" width="12" height="12" rx="3.5" fill="currentColor"/><path d="M8.5 12.5V10a4.5 4.5 0 0 1 4.5-4.5h1.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M12.5 2.8l2.6 2.7-2.6 2.7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span class="brand-title">Tenant Migration</span>
     </div>
     <nav class="nav-links">${navHtml}</nav>
     <div class="nav-status">${sourcePill}${destPill}</div>
@@ -92,7 +92,7 @@ export function renderFooter() {
   const mount = document.getElementById("page-footer");
   if (!mount) return;
   mount.innerHTML = `
-    <p class="copyright">© 1997 - 2026 Sophos Ltd. All rights reserved.</p>
+    <p class="copyright">Unofficial tool, not from Sophos. MIT licence, © 2026 Aaron Jacobs.</p>
   `;
 }
 

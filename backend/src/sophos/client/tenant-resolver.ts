@@ -1,6 +1,6 @@
 /**
  * Vendored from sophos-central-mcp @ 1b10f6d3aa3f2d5ed3dce70533688b2a0f4dbe4d
- * Upstream: https://github.com/Aaronjacobs000/sophos-central-mcp/blob/main/src/client/tenant-resolver.ts
+ * Upstream: https://github.com/Aaronjacobs000/sophos-mcp/blob/main/src/client/tenant-resolver.ts
  * License: MIT
  *
  * Local modifications:

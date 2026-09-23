@@ -17,10 +17,11 @@
   gap: 0.85rem;
   flex-shrink: 0;
 }
-.nav-brand img.brand-logo {
-  height: 22px;
-  width: auto;
+.nav-brand .brand-mark {
+  width: 24px;
+  height: 24px;
   display: block;
+  color: #5ee0d0;
 }
 .nav-brand .brand-title {
   color: var(--text-strong);
@@ -294,10 +295,19 @@
   max-width: 540px;
 }
 .welcome-logo {
-  display: block;
-  width: 200px;
-  height: auto;
+  display: flex;
+  justify-content: center;
   margin: 0 auto 1.5rem;
+  color: #5ee0d0;
+}
+.welcome-logo .welcome-mark {
+  width: 56px;
+  height: 56px;
+}
+.welcome-header .unofficial {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  margin: 0.5rem 0 0;
 }
 .welcome-card {
   background: var(--bg-surface-1);

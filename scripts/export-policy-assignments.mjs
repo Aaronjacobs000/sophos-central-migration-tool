@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Export Sophos Central policy assignments to CSV.
+ * Export Sophos Fusion (formerly Sophos Central) policy assignments to CSV.
  *
  * Answers GitHub issue #1: "view and export the records of all Peripheral
  * Control policy assigned and which user/device/group ... can we automate this?"

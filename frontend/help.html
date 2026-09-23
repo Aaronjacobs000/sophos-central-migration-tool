@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Help — Sophos Central Migration Tool</title>
+  <title>Help · Sophos Fusion Tenant Migration</title>
+  <link rel="icon" href="/mark.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="/css/base.css" />
   <link rel="stylesheet" href="/css/components.css" />
 </head>
@@ -16,7 +17,7 @@
 
     <section class="panel-card">
       <h2>What this tool does</h2>
-      <p>Connects to two Sophos Central tenants — a <strong>source</strong> and a
+      <p>Connects to two Sophos Fusion (formerly Sophos Central) tenants, a <strong>source</strong> and a
         <strong>destination</strong> — and lets you migrate configuration and
         devices between them via the official Sophos APIs. It does not replicate
         the entire tenant; it gives you targeted, auditable control over what
@@ -32,7 +33,7 @@
     <section class="panel-card" style="margin-top:1.25rem;">
       <h2>Before you start</h2>
       <ol>
-        <li>Sign in to the <strong>source</strong> Sophos Central tenant as a Super Admin.</li>
+        <li>Sign in to the <strong>source</strong> Sophos Fusion tenant as a Super Admin.</li>
         <li>Open <strong>Global Settings → API Credentials</strong> and click <em>Add Credential</em>. Pick a Super Admin role and copy the Client ID and Client Secret.</li>
         <li>Repeat the same steps in the <strong>destination</strong> tenant.</li>
         <li>This tool only uses tenant-scoped API credentials — partner or organization credentials are not supported.</li>
@@ -100,9 +101,9 @@
     <section class="panel-card" style="margin-top:1.25rem;">
       <h2>Useful links</h2>
       <ul>
-        <li><a href="https://docs.sophos.com/central/customer/help/en-us/ManageYourProducts/GlobalSettings/DeviceMigration/" target="_blank" rel="noopener">Sophos device migration documentation</a></li>
+        <li><a href="https://docs.sophos.com/fusion/customer/help/en-us/ManageYourProducts/GlobalSettings/DeviceMigration/" target="_blank" rel="noopener">Device migration - Sophos Fusion Admin</a></li>
         <li><a href="https://developer.sophos.com/" target="_blank" rel="noopener">Sophos developer portal</a></li>
-        <li><a href="https://github.com/Aaronjacobs000/sophos-central-mcp" target="_blank" rel="noopener">sophos-central-mcp repo</a> (the upstream MCP server some of the API code is vendored from)</li>
+        <li><a href="https://github.com/Aaronjacobs000/sophos-mcp" target="_blank" rel="noopener">sophos-mcp repo</a> (formerly sophos-central-mcp), the MCP server some of the API code is vendored from</li>
       </ul>
     </section>
   </main>

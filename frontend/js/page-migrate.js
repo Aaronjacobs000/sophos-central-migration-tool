@@ -145,7 +145,7 @@ function showResult(variant, html) {
 function migrationErrorHint(msg) {
   const m = String(msg);
   if (/migration is not enabled/i.test(m) || (/403/.test(m) && /migration/i.test(m))) {
-    return `${escapeHtml(m)}<br/><br/><strong>Fix:</strong> In Sophos Central on the <strong>sending</strong> tenant, go to <strong>Overview &gt; Global Settings &gt; Device Migration</strong> and turn on <strong>Allow device migration</strong>. Then retry.`;
+    return `${escapeHtml(m)}<br/><br/><strong>Fix:</strong> In Sophos Fusion on the <strong>sending</strong> tenant, go to <strong>Overview &gt; Global Settings &gt; Device Migration</strong> and turn on <strong>Allow device migration</strong>. Then retry.`;
   }
   if (/must not match the current tenant/i.test(m)) {
     return `${escapeHtml(m)}<br/><br/><strong>Fix:</strong> The source and destination appear to be the same tenant. Check your credential configuration.`;

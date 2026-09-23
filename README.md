@@ -1,8 +1,13 @@
-# Sophos Central Migration Tool
+# Sophos Fusion Tenant Migration Tool (formerly Sophos Central)
 
-A locally-run web tool for migrating configuration and devices between two Sophos Central tenants.
+> **Unofficial project, not from Sophos.** This is a personal project by an individual. It is
+> not an official Sophos product and it is not built, endorsed, supported, or warranted by
+> Sophos. It calls the public Sophos APIs using credentials you supply. Use it at your own
+> risk, and raise problems as issues on this repository rather than with Sophos support.
 
-Connects to a **source** and **destination** tenant via the official Sophos Central APIs, provides a side-by-side view of policies, groups, exclusions, and endpoints, and lets you migrate selected items in a controlled, auditable way — including the actual two-tenant device migration flow with live progress tracking.
+A locally-run web tool for migrating configuration and devices between two Sophos Fusion (formerly Sophos Central) tenants.
+
+Connects to a **source** and **destination** tenant via the public Sophos Fusion APIs, provides a side-by-side view of policies, groups, exclusions, and endpoints, and lets you migrate selected items in a controlled, auditable way. That includes the two-tenant device migration flow with live progress tracking.
 
 ![Dark-themed UI matching the Sophos Central dashboard](docs/screenshot-placeholder.png)
 
@@ -33,7 +38,7 @@ A first-run welcome wizard walks you through either mode, tests the connection b
 - **Select All** — select all eligible (non-stale) devices on either side, respecting the current hostname filter.
 - **Endpoint detail modal** — click Detail on any device to see the full Sophos API response: ID, type, OS version, is-server flag, health breakdown (threats + services + individual service details), IPv4/IPv6/MAC addresses, associated person, tamper protection, isolation, lockdown, group, assigned products with versions and status, and last seen.
 - **Two-tenant migration flow** — uses the official `/endpoint/v1/migrations` API. The tool POSTs a receiver job on the target tenant (with `fromTenant` + `endpoints`), then PUTs to the same job ID on the source tenant (with `token` + `endpoints`) to trigger the sender. Both sides are polled every 10 seconds via Server-Sent Events, and per-device status is shown live in the browser. Completion is derived from per-endpoint statuses (`succeeded` / `failed` / `pending`).
-- **All migrations view** — the migration jobs page queries both tenant APIs and merges the results with locally-tracked jobs. Migrations started from Sophos Central, other tools, or other workstations are visible alongside your own, with origin badges to distinguish them.
+- **All migrations view**: the migration jobs page queries both tenant APIs and merges the results with locally-tracked jobs. Migrations started from the Sophos Fusion console, other tools, or other workstations are visible alongside your own, with origin badges to distinguish them.
 - **Prerequisite check** — the migration page warns that Device Migration must be enabled on the sending tenant (Global Settings > Device Migration) before starting, and surfaces a specific fix message if the API returns a 403.
 - **Migration job history** — all jobs are persisted to `data/migration-jobs.json` so you can reopen a job detail page after a browser refresh or server restart. Cancel any in-flight job (deletes both upstream Sophos jobs with double confirmation).
 
@@ -63,7 +68,7 @@ Available when using partner or organization credentials:
 ## Prerequisites
 
 - **Node.js 20** or newer
-- **Sophos Central API credentials** — either:
+- **Sophos Fusion (formerly Sophos Central) API credentials**, either:
   - **Direct tenant mode**: a Client ID + Client Secret created in each tenant under *Global Settings > API Credentials* (Super Admin role recommended)
   - **Partner mode**: a single partner or organization API credential set that manages both tenants
 - For device migration: ensure **Device Migration is enabled** on the **sending** tenant in *Global Settings > Device Migration*
@@ -71,8 +76,8 @@ Available when using partner or organization credentials:
 ## Quick start
 
 ```bash
-git clone https://github.com/Aaronjacobs000/sophos-central-migration-tool.git
-cd sophos-central-migration-tool
+git clone https://github.com/Aaronjacobs000/sophos-tenant-migration-tool.git
+cd sophos-tenant-migration-tool
 npm install
 npm start
 ```
@@ -89,7 +94,7 @@ PORT=3200 npm start
 
 The Sophos device migration API (`/endpoint/v1/migrations`) uses a two-tenant handshake:
 
-1. **Enable migration** — Device Migration must be turned on in the sending tenant's Sophos Central UI (*Overview > Global Settings > Device Migration*). The tool displays a prerequisite banner and surfaces a specific error if this step is missed.
+1. **Enable migration**: Device Migration must be turned on in the sending tenant's Sophos Fusion console (*Overview > Global Settings > Device Migration*). The tool displays a prerequisite banner and surfaces a specific error if this step is missed.
 2. **Receiver job** — `POST /endpoint/v1/migrations` on the receiving (destination) tenant with `fromTenant` (the sending tenant's UUID) and `endpoints` (the device UUIDs to migrate). The response includes the job `id` and a handshake `token`.
 3. **Sender trigger** — `PUT /endpoint/v1/migrations/{jobId}` on the sending (source) tenant using the same job ID, with `token` (from the receiver response) and `endpoints`. This triggers the migration — it does not create a separate job.
 4. **Polling** — the tool polls both sides every 10 seconds and pushes status updates to the browser via Server-Sent Events. Per-endpoint status transitions through `pending` → `succeeded` (or `failed`). Aggregate job status is derived from endpoint-level results since the Sophos API does not populate a top-level job status field.
@@ -111,12 +116,12 @@ backend/
     sophos/
       constants.ts               # Sophos auth URL + global API base URL
       tenant-context.ts          # createDirectContext, createPartnerContext, partnerSideContext
-      auth/token-manager.ts      # OAuth2 client credentials + auto-refresh (from sophos-central-mcp)
+      auth/token-manager.ts      # OAuth2 client credentials + auto-refresh (from sophos-mcp)
       client/
-        sophos-client.ts         # HTTP client with retry, rate-limit, region routing (from sophos-central-mcp)
-        tenant-resolver.ts       # /whoami + tenant list + regional host cache (from sophos-central-mcp)
+        sophos-client.ts         # HTTP client with retry, rate-limit, region routing (from sophos-mcp)
+        tenant-resolver.ts       # /whoami + tenant list + regional host cache (from sophos-mcp)
       types/
-        sophos.ts                # Sophos API response types (from sophos-central-mcp)
+        sophos.ts                # Sophos API response types (from sophos-mcp)
         migration.ts             # Policy, group, exclusion, migration job types
       api/
         policies.ts              # /endpoint/v1/policies wrappers
@@ -171,7 +176,7 @@ data/                            # gitignored, created at runtime
 
 ## Credits
 
-Core Sophos Central API client code (OAuth2 token manager, HTTP client with retry/rate-limiting, tenant resolver with regional routing) is vendored from [sophos-central-mcp](https://github.com/Aaronjacobs000/sophos-central-mcp) (MIT License). See [ATTRIBUTIONS.md](ATTRIBUTIONS.md) for details.
+Core Sophos API client code (OAuth2 token manager, HTTP client with retry/rate-limiting, tenant resolver with regional routing) is vendored from [sophos-mcp](https://github.com/Aaronjacobs000/sophos-mcp) (formerly sophos-central-mcp, MIT License). See [ATTRIBUTIONS.md](ATTRIBUTIONS.md) for details.
 
 ## License
 

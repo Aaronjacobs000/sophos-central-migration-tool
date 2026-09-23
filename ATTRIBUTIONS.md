@@ -1,9 +1,9 @@
 # Third-party attributions
 
-## sophos-central-mcp
+## sophos-mcp (formerly sophos-central-mcp)
 
 Portions of `backend/src/sophos/` are vendored from the
-[sophos-central-mcp](https://github.com/Aaronjacobs000/sophos-central-mcp) project
+[sophos-mcp](https://github.com/Aaronjacobs000/sophos-mcp) project (formerly sophos-central-mcp)
 (MIT License).
 
 ### Files vendored
@@ -22,7 +22,7 @@ exact commit SHA at the time of the copy.
 
 ### Refreshing the vendored files
 
-1. `git clone https://github.com/Aaronjacobs000/sophos-central-mcp /tmp/mcp`
+1. `git clone https://github.com/Aaronjacobs000/sophos-mcp /tmp/mcp`
 2. Copy the four files above from `/tmp/mcp/src/...` to their local paths.
 3. Re-apply the constants tweak: replace imports of `SOPHOS_AUTH_URL` and
    `SOPHOS_GLOBAL_API` from `../config/config.js` with

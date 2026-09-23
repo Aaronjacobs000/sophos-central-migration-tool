@@ -1,10 +1,18 @@
 {
-  "name": "sophos-central-migration-tool",
+  "name": "sophos-tenant-migration-tool",
   "version": "0.1.0",
-  "description": "Locally-run web tool for migrating configuration and devices between two Sophos Central tenants.",
+  "description": "Unofficial, locally run web tool for migrating configuration and devices between two Sophos Fusion (formerly Sophos Central) tenants.",
   "type": "module",
   "private": true,
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Aaronjacobs000/sophos-tenant-migration-tool.git"
+  },
+  "homepage": "https://github.com/Aaronjacobs000/sophos-tenant-migration-tool#readme",
+  "bugs": {
+    "url": "https://github.com/Aaronjacobs000/sophos-tenant-migration-tool/issues"
+  },
   "engines": {
     "node": ">=20"
   },
