@@ -2,6 +2,7 @@ import "./nav.js";
 import { api } from "./api.js";
 import { toast } from "./toast.js";
 import { icon } from "./icons.js";
+import { esc as escHtml } from "./ui.js";
 
 let currentJob = null;
 let eventSource = null;
@@ -17,6 +18,8 @@ async function boot() {
 
   document.getElementById("cancel-btn").addEventListener("click", () => cancelJob(id));
   document.getElementById("refresh-btn").addEventListener("click", () => manualRefresh(id));
+  document.getElementById("membership-preview").addEventListener("click", () => loadMembership(id, true));
+  document.getElementById("membership-apply").addEventListener("click", () => applyMembership(id));
 
   connectStream(id);
 }
@@ -91,6 +94,86 @@ function render(job) {
 
   // Per-endpoint grid
   renderEndpoints(job);
+
+  // Preview group membership once, the first time any device has moved.
+  if (!membershipPreviewed && hasMovedDevice(job)) {
+    membershipPreviewed = true;
+    loadMembership(job.localJobId, true);
+  }
+}
+
+// ---------- group membership after the move ----------
+
+let membershipPreviewed = false;
+
+function hasMovedDevice(job) {
+  const all = [...(job.sourceSnapshot?.endpointDetails ?? []), ...(job.destSnapshot?.endpointDetails ?? [])];
+  return all.some((e) => epStatusClass(e.status) === "ep-ok");
+}
+
+const MEMBERSHIP_TAG = {
+  "will-add": ["tag-accent", "will add"],
+  added: ["tag-ok", "added"],
+  "already-member": ["tag-muted", "already in group"],
+  "no-group": ["tag-muted", "no group"],
+  "group-missing": ["tag-warn", "group missing"],
+  "not-moved": ["tag-muted", "not moved yet"],
+  "move-failed": ["tag-bad", "move failed"],
+  "no-new-id": ["tag-warn", "no new ID"],
+  error: ["tag-bad", "failed"],
+};
+
+async function loadMembership(id, dryRun) {
+  const body = document.getElementById("membership-body");
+  body.innerHTML = `<p class="hint"><span class="spin"></span> ${dryRun ? "Working out which devices go where" : "Adding devices to groups"}</p>`;
+  try {
+    const res = await api.post(`/api/migrate/devices/jobs/${encodeURIComponent(id)}/group-membership`, { dryRun });
+    renderMembership(res);
+    return res;
+  } catch (err) {
+    body.innerHTML = `<div class="banner banner-err">${escHtml(err.message || "Group membership check failed")}</div>`;
+    return null;
+  }
+}
+
+async function applyMembership(id) {
+  const toAdd = document.getElementById("membership-apply").dataset.count;
+  if (!confirm(`Add ${toAdd} moved device(s) to their destination groups?\n\nThis writes to the receiving tenant.`)) return;
+  const res = await loadMembership(id, false);
+  if (!res) return;
+  const failed = res.counts.error ?? 0;
+  toast(`Added ${res.counts.added ?? 0} device(s) to groups${failed ? `, ${failed} failed` : ""}.`, failed ? "err" : "ok");
+}
+
+function renderMembership(res) {
+  const c = res.counts;
+  const willAdd = c["will-add"] ?? 0;
+  const apply = document.getElementById("membership-apply");
+  apply.disabled = willAdd === 0;
+  apply.dataset.count = String(willAdd);
+  const parts = [];
+  if (res.dryRun && willAdd) parts.push(`<span class="tag tag-accent">${willAdd} to add</span>`);
+  if (c.added) parts.push(`<span class="tag tag-ok">${c.added} added</span>`);
+  if (c["group-missing"]) parts.push(`<span class="tag tag-warn">${c["group-missing"]} group missing</span>`);
+  if (c.error) parts.push(`<span class="tag tag-bad">${c.error} failed</span>`);
+  document.getElementById("membership-summary").innerHTML = parts.join(" ");
+
+  const rows = res.rows.map((r) => {
+    const [cls, label] = MEMBERSHIP_TAG[r.status] ?? ["tag-muted", r.status];
+    return `
+      <tr>
+        <td><span class="cell-name">${escHtml(r.hostname)}</span></td>
+        <td>${r.sourceGroup ? escHtml(r.sourceGroup) : `<span class="hint">none</span>`}</td>
+        <td><span class="tag ${cls}">${escHtml(label)}</span></td>
+        <td><span class="hint">${escHtml(r.message || "")}</span></td>
+      </tr>`;
+  }).join("");
+  document.getElementById("membership-body").innerHTML = `
+    <table class="data-table">
+      <thead><tr><th>Device</th><th>Source group</th><th>Status</th><th>Detail</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <p class="hint check-foot">${res.dryRun ? "Preview only. Nothing was written." : "Each group change is in data/audit.log."}</p>`;
 }
 
 function renderWarnings(job) {

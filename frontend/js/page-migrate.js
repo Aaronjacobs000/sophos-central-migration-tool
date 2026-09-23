@@ -245,6 +245,13 @@ function showPlan(plan, dir) {
     { title: `Sender trigger on the ${fromLabel} tenant`, body: `<code>${escapeHtml(plan.senderTrigger?.method ?? "PUT")}</code> on <code>${escapeHtml(plan.sourceApiHost)}</code> with the handshake token from the receiver job.` },
     { title: "Live status", body: "The job page polls both tenants every 10 seconds until every device has moved or failed." },
   ];
+  if (plan.groups) {
+    const named = plan.groups.map((g) => `${escapeHtml(g.name)} (${g.count})`).join(", ");
+    steps.push({
+      title: "Group membership recorded",
+      body: `${named ? `Groups: ${named}.` : "None of the devices is in a group."}${plan.ungrouped && named ? ` ${plan.ungrouped} device${plan.ungrouped === 1 ? " is" : "s are"} in no group.` : ""} After the move, the job page can add each device to the destination group with the same name.`,
+    });
+  }
   document.getElementById("result-area").innerHTML = `
     <div class="plan-box">
       <div class="plan-head">${icon("checkCircle")}<strong>Dry run passed.</strong><span class="hint">Nothing was created. The real run would do this:</span></div>

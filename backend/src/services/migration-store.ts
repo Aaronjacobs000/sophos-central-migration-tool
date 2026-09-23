@@ -5,7 +5,7 @@
  *
  * Stored as a single JSON file at data/migration-jobs.json.
  *
- * File operations retry on EBUSY / EPERM — OneDrive (and other cloud-sync
+ * File operations retry on EBUSY / EPERM: OneDrive (and other cloud-sync
  * tools) briefly lock files during upload, which causes transient failures
  * on Windows.
  */
@@ -16,6 +16,11 @@ import { randomUUID } from "node:crypto";
 import { getState } from "../state.js";
 import { log } from "../log.js";
 import type { SophosMigrationJob } from "../sophos/types/migration.js";
+
+export interface EndpointGroupRef {
+  id?: string;
+  name: string;
+}
 
 export interface LocalMigrationJob {
   localJobId: string;
@@ -28,6 +33,11 @@ export interface LocalMigrationJob {
   fromToken: string;
   endpointIds: string[];
   endpointHostnames: Record<string, string>;
+  /**
+   * The group each device was in on the sending tenant when the job was
+   * created (null for no group). Absent on jobs created before 0.2.0.
+   */
+  endpointGroups?: Record<string, EndpointGroupRef | null>;
   status: "in-progress" | "complete" | "failed" | "partially-complete" | "cancelled";
   sourceSnapshot: SophosMigrationJob | null;
   destSnapshot: SophosMigrationJob | null;
@@ -78,7 +88,7 @@ async function writeAll(jobs: LocalMigrationJob[]): Promise<void> {
   const dir = path.dirname(file);
   await fs.mkdir(dir, { recursive: true });
   await withRetry("writeAll", async () => {
-    // Write directly instead of tmp+rename — OneDrive can lock the target
+    // Write directly instead of tmp+rename. OneDrive can lock the target
     // during sync, which makes the rename fail even if the write succeeds.
     await fs.writeFile(file, JSON.stringify(jobs, null, 2), "utf8");
   });

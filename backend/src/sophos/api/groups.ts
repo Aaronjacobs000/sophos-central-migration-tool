@@ -3,6 +3,7 @@
  */
 
 import type { SophosClient } from "../client/sophos-client.js";
+import { listAllPages } from "./paging.js";
 import type { SophosEndpoint, SophosEndpointPage } from "../types/sophos.js";
 import type {
   SophosEndpointGroup,
@@ -79,4 +80,53 @@ export async function listGroupMembers(
     page++;
   }
   return items;
+}
+
+// --- Group membership after a device move (0.2.0) ---
+
+/** Every endpoint group, reading all pages. */
+export async function listAllGroups(
+  client: SophosClient,
+  tenantId: string,
+): Promise<SophosEndpointGroup[]> {
+  return listAllPages<SophosEndpointGroup>(client, tenantId, GROUPS_PATH);
+}
+
+/** IDs of the endpoints in a group. This list uses cursor paging. */
+export async function listGroupEndpointIds(
+  client: SophosClient,
+  tenantId: string,
+  groupId: string,
+): Promise<string[]> {
+  const ids: string[] = [];
+  let pageFromKey: string | undefined;
+  do {
+    const res = await client.tenantRequest<{ items?: Array<{ id: string }>; pages?: { nextKey?: string } }>(
+      tenantId,
+      `${GROUPS_PATH}/${encodeURIComponent(groupId)}/endpoints`,
+      { params: { pageSize: "500", fields: "id", ...(pageFromKey ? { pageFromKey } : {}) } },
+    );
+    ids.push(...(res.items ?? []).map((e) => e.id));
+    pageFromKey = res.pages?.nextKey;
+  } while (pageFromKey);
+  return ids;
+}
+
+export interface AddToGroupResponse {
+  addedEndpoints?: Array<{ id: string; hostname?: string }>;
+  errors?: { endpointsNotFound?: string[]; endpointsOfWrongType?: string[] };
+}
+
+/** POST /endpoint/v1/endpoint-groups/{id}/endpoints with at most 1000 IDs. */
+export async function addEndpointsToGroup(
+  client: SophosClient,
+  tenantId: string,
+  groupId: string,
+  ids: string[],
+): Promise<AddToGroupResponse> {
+  return client.tenantRequest<AddToGroupResponse>(
+    tenantId,
+    `${GROUPS_PATH}/${encodeURIComponent(groupId)}/endpoints`,
+    { method: "POST", body: { ids } },
+  );
 }

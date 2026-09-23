@@ -6,8 +6,10 @@
  *      haven't checked in within the last 14 days.
  *   2. POST receiver job on DESTINATION → returns job id + handshake token.
  *   3. PUT sender trigger on SOURCE using the SAME job id + token.
- *      (This is NOT a second POST — it triggers the existing job.)
- *   4. Persist the job ID to data/migration-jobs.json.
+ *      (This is NOT a second POST; it triggers the existing job.)
+ *   4. Persist the job ID to data/migration-jobs.json, with the group each
+ *      device was in on the sending tenant (read in step 1), so the job page
+ *      can put moved devices back into same-named groups afterwards.
  *   5. UI subscribes via SSE to /api/migrate/devices/jobs/:id/stream.
  */
 
@@ -27,6 +29,7 @@ import {
   deleteJob,
   getJob,
   updateJob,
+  type EndpointGroupRef,
   type LocalMigrationJob,
 } from "./migration-store.js";
 import { audit } from "./audit-log.js";
@@ -61,6 +64,10 @@ export interface StartMigrationResult {
     destApiHost: string;
     receiverBody: { fromTenant: string; endpoints: string[] };
     senderTrigger: { method: string; endpoints: string[]; token: string };
+    /** Groups the devices are in on the sending tenant, recorded with the job. */
+    groups: Array<{ name: string; count: number }>;
+    /** Devices in no group. */
+    ungrouped: number;
   };
   /** Present in real run: the persisted local job. */
   job?: LocalMigrationJob;
@@ -98,7 +105,7 @@ export async function startMigration(
   // Replace req.endpointIds with the cleaned version
   req.endpointIds = cleanIds;
 
-  // Step 1 — preflight: load each endpoint from the "from" side
+  // Step 1: preflight, load each endpoint from the "from" side
   const preflightFailures: PreflightFailure[] = [];
   const acceptedEndpoints: SophosEndpoint[] = [];
   for (const id of req.endpointIds) {
@@ -126,6 +133,7 @@ export async function startMigration(
   if (preflightFailures.length > 0) return { preflightFailures };
 
   const endpointIds = acceptedEndpoints.map((e) => e.id);
+  const endpointGroups = groupSnapshot(acceptedEndpoints);
 
   if (req.dryRun) {
     return {
@@ -144,11 +152,12 @@ export async function startMigration(
           endpoints: endpointIds,
           token: "<would be returned by receiver job>",
         },
+        ...summariseGroups(endpointGroups),
       },
     };
   }
 
-  // Step 2 — POST receiver job on the destination tenant.
+  // Step 2: POST receiver job on the destination tenant.
   // fromTenant = the sending tenant (where endpoints currently live).
   const receiverBody = {
     fromTenant: from.tenantId,
@@ -177,7 +186,7 @@ export async function startMigration(
     detail: { jobName: req.jobName, direction },
   });
 
-  // Step 3 — PUT sender trigger on the source tenant.
+  // Step 3: PUT sender trigger on the source tenant.
   // Uses the SAME job ID from the receiver. Body is just { token, endpoints }.
   const senderBody = {
     token: handshakeToken,
@@ -213,7 +222,7 @@ export async function startMigration(
     throw err;
   }
 
-  // Step 4 — persist locally.
+  // Step 4: persist locally.
   // The migration job ID is shared across both tenants (same ID).
   const job = await createJob({
     jobName: req.jobName,
@@ -224,6 +233,7 @@ export async function startMigration(
     endpointHostnames: Object.fromEntries(
       acceptedEndpoints.map((e) => [e.id, e.hostname ?? ""]),
     ),
+    endpointGroups,
     direction,
   });
 
@@ -374,6 +384,33 @@ function aggregateStatus(
   }
 
   return "in-progress";
+}
+
+/**
+ * The group each device is in, from the endpoint records the preflight
+ * already read. Membership has to be captured before the move: once a device
+ * leaves, the sending tenant no longer lists it.
+ */
+function groupSnapshot(endpoints: SophosEndpoint[]): Record<string, EndpointGroupRef | null> {
+  const out: Record<string, EndpointGroupRef | null> = {};
+  for (const ep of endpoints) {
+    const group = (ep as SophosEndpoint & { group?: { id?: string; name?: string } }).group;
+    out[ep.id] = group?.name ? { id: group.id, name: group.name } : null;
+  }
+  return out;
+}
+
+function summariseGroups(snapshot: Record<string, EndpointGroupRef | null>) {
+  const counts = new Map<string, number>();
+  let ungrouped = 0;
+  for (const g of Object.values(snapshot)) {
+    if (g?.name) counts.set(g.name, (counts.get(g.name) ?? 0) + 1);
+    else ungrouped++;
+  }
+  const groups = [...counts.entries()]
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  return { groups, ungrouped };
 }
 
 interface SafeResult<T> {

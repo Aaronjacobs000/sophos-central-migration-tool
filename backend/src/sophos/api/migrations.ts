@@ -1,5 +1,5 @@
 /**
- * Sophos /endpoint/v1/migrations wrappers — the actual two-tenant device
+ * Sophos /endpoint/v1/migrations wrappers: the actual two-tenant device
  * migration API.
  *
  * API flow (from Sophos docs):
@@ -12,11 +12,12 @@
  *   3. GET /endpoint/v1/migrations/{jobId}/endpoints on either tenant
  *      → per-endpoint status
  *
- * The sender does NOT create a new job — it triggers the existing receiver
+ * The sender does NOT create a new job; it triggers the existing receiver
  * job via PUT using the same migration job ID.
  */
 
 import type { SophosClient } from "../client/sophos-client.js";
+import { listAllPages } from "./paging.js";
 import type {
   SophosMigrationJob,
   SophosMigrationJobPage,
@@ -134,4 +135,23 @@ export async function listMigrationJobEndpoints(
     page++;
   }
   return items;
+}
+
+/** One device in a migration job, with the ID it has on the receiving tenant once moved. */
+export interface MigrationEndpointStatus {
+  id: string;
+  status?: string;
+  newId?: string;
+  migratedAt?: string;
+  failedAt?: string;
+  reason?: string;
+}
+
+/** Every device in a job, reading all pages (asks for pageTotal). */
+export async function listMigrationEndpointStatuses(
+  client: SophosClient,
+  tenantId: string,
+  jobId: string,
+): Promise<MigrationEndpointStatus[]> {
+  return listAllPages<MigrationEndpointStatus>(client, tenantId, `${MIGRATIONS_PATH}/${encodeURIComponent(jobId)}/endpoints`);
 }

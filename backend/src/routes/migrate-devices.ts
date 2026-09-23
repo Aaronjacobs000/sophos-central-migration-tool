@@ -1,11 +1,13 @@
 /**
  * Routes for the two-tenant device migration flow.
- *   POST   /api/migrate/devices                — start a job
- *   GET    /api/migrate/devices/jobs            — list local jobs
- *   GET    /api/migrate/devices/jobs/all        — merged local + API jobs
- *   GET    /api/migrate/devices/jobs/:id        — single job detail
- *   GET    /api/migrate/devices/jobs/:id/stream — SSE live updates
- *   DELETE /api/migrate/devices/jobs/:id        — cancel + purge
+ *   POST   /api/migrate/devices                          start a job
+ *   GET    /api/migrate/devices/jobs                     list local jobs
+ *   GET    /api/migrate/devices/jobs/all                 merged local + API jobs
+ *   GET    /api/migrate/devices/jobs/:id                 single job detail
+ *   GET    /api/migrate/devices/jobs/:id/stream          SSE live updates
+ *   DELETE /api/migrate/devices/jobs/:id                 cancel + purge
+ *   POST   /api/migrate/devices/jobs/:id/group-membership  put moved devices
+ *          back into same-named groups (dryRun supported)
  */
 
 import { Router } from "express";
@@ -17,6 +19,7 @@ import {
   purgeJob,
 } from "../services/device-migrator.js";
 import { listJobs, getJob } from "../services/migration-store.js";
+import { restoreGroupMembership, JobNotFoundError } from "../services/group-membership.js";
 import { listMigrationJobs } from "../sophos/api/migrations.js";
 import { requireContext } from "../state.js";
 import type { SophosMigrationJob } from "../sophos/types/migration.js";
@@ -99,7 +102,7 @@ migrateDevicesRouter.get("/migrate/devices/jobs/all", async (_req, res, next) =>
     const coveredApiIds = new Set<string>();
     const merged: MergedMigrationJob[] = [];
 
-    // 1. Start with all local jobs — they get full detail
+    // 1. Start with all local jobs; they get full detail
     for (const lj of localJobs) {
       coveredApiIds.add(lj.sourceMigrationId);
       coveredApiIds.add(lj.destMigrationId);
@@ -165,6 +168,19 @@ migrateDevicesRouter.delete("/migrate/devices/jobs/:id", async (req, res, next) 
     }
     res.json({ ok: true });
   } catch (err) {
+    next(err);
+  }
+});
+
+migrateDevicesRouter.post("/migrate/devices/jobs/:id/group-membership", async (req, res, next) => {
+  try {
+    const dryRun = req.query?.dryRun === "true" || req.body?.dryRun === true;
+    res.json(await restoreGroupMembership(req.params.id!, { dryRun }));
+  } catch (err) {
+    if (err instanceof JobNotFoundError) {
+      res.status(404).json({ error: "not_found", message: err.message });
+      return;
+    }
     next(err);
   }
 });
