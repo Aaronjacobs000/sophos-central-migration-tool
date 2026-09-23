@@ -15,44 +15,38 @@
   <header id="app-nav" class="topbar"></header>
 
   <main class="page-main">
-    <h1>Tenant dashboard</h1>
-    <p class="page-lead">Connection status for source and destination, and the preload state
-      for every data section the tool uses.</p>
-
-    <div class="tile-row">
-      <section class="tile" id="tile-source">
-        <h2>Source tenant</h2>
-        <div class="tile-body" data-body="source"><em>loading…</em></div>
-      </section>
-      <section class="tile" id="tile-dest">
-        <h2>Destination tenant</h2>
-        <div class="tile-body" data-body="dest"><em>loading…</em></div>
-      </section>
-    </div>
-
-    <section class="panel-card">
-      <div class="panel-toolbar">
-        <h2>Preloaded data</h2>
+    <section class="hero glass" aria-labelledby="hero-route">
+      <div class="hero-top">
+        <span class="eyebrow">Migration route</span>
         <span class="spacer"></span>
-        <button id="preload-restart" class="btn">Restart preload</button>
-        <a href="/logs.html" class="btn">View logs</a>
+        <button type="button" class="btn btn-small" id="details-toggle" aria-expanded="false" aria-controls="conn-details">Connection details</button>
       </div>
-      <p class="hint">When credentials are saved, the tool fetches policies, groups,
-        exclusions and endpoints for both tenants in the background. List pages then
-        render instantly from this cache. If anything fails, click Refresh on the row.</p>
-      <div id="preload-grid"><div class="empty-state">Loading…</div></div>
+      <h1 id="hero-route" class="hero-route">
+        <span class="hero-side" data-side="source"><span class="conn-dot"></span><span class="hero-name">Source</span></span>
+        <span class="hero-arrow" aria-label="to"></span>
+        <span class="hero-side" data-side="dest"><span class="conn-dot"></span><span class="hero-name">Destination</span></span>
+      </h1>
+      <p class="hero-meta" id="hero-meta">Checking both tenants</p>
+      <div class="drawer hidden" id="conn-details">
+        <div class="drawer-grid">
+          <div><h3 class="side-title">Source</h3><div class="tile-body" data-body="source"></div></div>
+          <div><h3 class="side-title is-dest">Destination</h3><div class="tile-body" data-body="dest"></div></div>
+        </div>
+      </div>
     </section>
 
-    <section class="callout">
-      <h3>Where to next?</h3>
-      <ul>
-        <li><strong>Policies</strong> → compare settings side-by-side and clone to destination</li>
-        <li><strong>Groups</strong> → mirror endpoint groups by name</li>
-        <li><strong>Exclusions</strong> → copy scanning, allowed, and blocked items</li>
-        <li><strong>Endpoints</strong> → select devices to migrate</li>
-        <li><strong>Migrations</strong> → track in-flight device migration jobs with live status</li>
-        <li><strong>Logs</strong> → see what the tool did and any errors that came back</li>
-      </ul>
+    <section class="journey" id="journey" aria-label="Migration steps"></section>
+
+    <section class="panel-card">
+      <div class="card-head">
+        <h2>Preloaded data</h2>
+        <span id="preload-summary" class="preload-summary"></span>
+        <span class="spacer"></span>
+        <button id="preload-restart" class="btn btn-small">Restart preload</button>
+        <a href="/logs.html" class="btn btn-small">View logs</a>
+      </div>
+      <p class="card-sub">After credentials are saved the tool loads these sections for both tenants in the background, so list pages open instantly. Refresh a side if it failed.</p>
+      <div id="preload-grid" class="count-grid"><div class="empty-state">Loading</div></div>
     </section>
   </main>
 
