@@ -3,6 +3,7 @@ import { api } from "./api.js";
 import { toast } from "./toast.js";
 import { getCachedSection, refreshSection } from "./preload-client.js";
 import { makeSortable } from "./sortable.js";
+import { icon } from "./icons.js";
 
 const FOURTEEN_DAYS_MS = 14 * 24 * 60 * 60 * 1000;
 
@@ -37,7 +38,7 @@ async function loadSide(side) {
     if (cached.status?.state === "error") {
       target.innerHTML = `
         <div class="banner banner-err">Preload failed: ${esc(cached.status.error || "")}</div>
-        <button class="btn" data-retry="${side}" style="margin-top:0.75rem;">Retry</button>`;
+        <button class="btn mt" data-retry="${side}">Retry</button>`;
       target.querySelector(`[data-retry="${side}"]`).addEventListener("click", async () => {
         target.innerHTML = `<div class="empty-state">Refreshing…</div>`;
         await refreshSection(side, "endpoints").catch(() => {});
@@ -45,7 +46,7 @@ async function loadSide(side) {
       });
       return;
     }
-    // idle — live fetch
+    // idle: live fetch
     const res = await api.get(`/api/${side}/endpoints`);
     state[side] = res.items || [];
     renderTable(side);
@@ -72,32 +73,30 @@ function renderTable(side) {
     const key = `${side}::${ep.id}`;
     const checked = state.selected.has(key) ? "checked" : "";
     const cb = stale
-      ? `<td class="col-check"><input type="checkbox" disabled title="Outside 14-day window"/></td>`
-      : `<td class="col-check"><input type="checkbox" data-key="${escAttr(key)}" ${checked}/></td>`;
-    const lastSeen = ep.lastSeenAt ? fmtRelative(ep.lastSeenAt) : "—";
-    const staleBadge = stale ? `<span class="diff-pill diff-pill-remove" style="margin-left:0.35rem;">stale</span>` : "";
+      ? `<td class="col-check"><input type="checkbox" disabled title="Outside the 14-day window" aria-label="Stale, cannot migrate"/></td>`
+      : `<td class="col-check"><input type="checkbox" data-key="${escAttr(key)}" ${checked} aria-label="Select ${escAttr(ep.hostname || "")}"/></td>`;
     const os = ep.os ? `${ep.os.name || ep.os.platform || ""}`.trim() : "";
-    const ips = (ep.ipv4Addresses || []).slice(0, 2).join(", ") || "—";
+    const ips = (ep.ipv4Addresses || []).slice(0, 2).join(", ") || "-";
     const person = ep.associatedPerson?.name || ep.associatedPerson?.viaLogin || "";
+    const seen = stale ? staleTag(ep) : `<span class="hint">${ep.lastSeenAt ? fmtRelative(ep.lastSeenAt) : "never"}</span>`;
+    const serverTag = ep.type === "server" || ep.os?.isServer ? `<span class="tag tag-muted">server</span>` : "";
     return `
-      <tr>
+      <tr class="${[stale ? "is-stale" : "", checked ? "selected" : ""].filter(Boolean).join(" ")}">
         ${cb}
-        <td>
-          <strong>${esc(ep.hostname || "")}</strong>${staleBadge}
-          ${person ? `<br/><span class="hint">${esc(person)}</span>` : ""}
+        <td class="ep-host" title="${escAttr([ep.hostname, os, person].filter(Boolean).join(" · "))}">
+          <span class="ep-host-inner"><span class="os-icon" title="${escAttr(os || "Unknown OS")}">${osIcon(ep)}</span><strong>${esc(ep.hostname || "")}</strong>${serverTag}${person ? `<span class="ep-person">${esc(person)}</span>` : ""}</span>
         </td>
-        <td><span class="hint">${esc(os)}</span></td>
-        <td>${esc(ep.health?.overall || "")}</td>
-        <td><span class="hint">${esc(ips)}</span></td>
-        <td><span class="hint">${lastSeen}</span></td>
-        <td class="col-actions"><button class="btn btn-small" data-detail='${escAttr(JSON.stringify(ep))}'>Detail</button></td>
+        <td class="ep-health">${healthTag(ep.health?.overall)}</td>
+        <td class="ep-ip col-ip"><span class="hint">${esc(ips)}</span></td>
+        <td class="ep-seen">${seen}</td>
+        <td class="col-actions"><button class="icon-btn" data-detail='${escAttr(JSON.stringify(ep))}' title="Details" aria-label="Details for ${escAttr(ep.hostname || "")}">${icon("info")}</button></td>
       </tr>`;
   }).join("");
 
   target.innerHTML = `
-    <table class="data-table">
+    <table class="data-table ep-table">
       <thead>
-        <tr><th class="col-check"></th><th>Hostname</th><th>OS</th><th>Health</th><th>IP</th><th>Seen</th><th></th></tr>
+        <tr><th class="col-check"></th><th class="ep-host">Hostname</th><th class="ep-health">Health</th><th class="ep-ip col-ip">IP</th><th class="ep-seen">Seen</th><th class="col-actions"></th></tr>
       </thead>
       <tbody>${rows}</tbody>
     </table>`;
@@ -107,12 +106,13 @@ function renderTable(side) {
     cb.addEventListener("change", (e) => {
       if (e.target.checked) state.selected.add(e.target.dataset.key);
       else state.selected.delete(e.target.dataset.key);
+      e.target.closest("tr")?.classList.toggle("selected", e.target.checked);
       renderBasket();
     });
   });
 
   target.querySelectorAll("[data-detail]").forEach((btn) => {
-    btn.addEventListener("click", (e) => showDetail(JSON.parse(e.target.dataset.detail)));
+    btn.addEventListener("click", (e) => showDetail(JSON.parse(e.currentTarget.dataset.detail)));
   });
 }
 
@@ -159,15 +159,23 @@ function renderBasket() {
   const total = srcCount + dstCount;
   basket.classList.toggle("hidden", total === 0);
 
-  let text = "";
+  let html = "";
   if (srcCount > 0 && dstCount > 0) {
-    text = `${srcCount} source + ${dstCount} dest endpoints selected (pick one direction)`;
-  } else if (srcCount > 0) {
-    text = `${srcCount} source endpoint${srcCount === 1 ? "" : "s"} → migrate to destination`;
+    html = `<strong>${srcCount}</strong> source and <strong>${dstCount}</strong> destination devices selected. Pick one side.`;
   } else {
-    text = `${dstCount} dest endpoint${dstCount === 1 ? "" : "s"} → migrate back to source`;
+    const side = srcCount > 0 ? "source" : "dest";
+    const count = srcCount || dstCount;
+    const filter = state.filters[side].toLowerCase();
+    const stale = state[side].filter(
+      (e) => isStale(e) && (!filter || (e.hostname || "").toLowerCase().includes(filter)),
+    ).length;
+    const parts = [`<strong>${count}</strong> selected`];
+    if (stale) parts.push(`${stale} stale excluded`);
+    parts.push(side === "source" ? "source to destination" : "destination back to source");
+    html = parts.join(" · ");
   }
-  document.getElementById("basket-text").textContent = text;
+  document.getElementById("basket-text").innerHTML = html;
+  document.getElementById("basket-migrate").disabled = srcCount > 0 && dstCount > 0;
 }
 
 function startMigrate() {
@@ -194,12 +202,12 @@ function showDetail(ep) {
   if (existing) existing.remove();
 
   const products = (ep.assignedProducts || []).map((p) =>
-    `<li><code>${esc(p.code)}</code> v${esc(p.version)} — ${esc(p.status)}</li>`
-  ).join("") || "<li>—</li>";
+    `<li><code>${esc(p.code)}</code> v${esc(p.version)}, ${esc(p.status)}</li>`
+  ).join("") || "<li>none</li>";
 
   const services = (ep.health?.services?.serviceDetails || []).map((s) =>
     `<li>${esc(s.name)}: ${esc(s.status)}</li>`
-  ).join("") || "<li>—</li>";
+  ).join("") || "<li>none</li>";
 
   const modal = document.createElement("div");
   modal.id = "detail-modal";
@@ -208,7 +216,7 @@ function showDetail(ep) {
     <div class="modal-card">
       <header class="modal-header">
         <h2>${esc(ep.hostname)}</h2>
-        <button class="btn btn-small modal-close">Close</button>
+        <button class="icon-btn modal-close" title="Close" aria-label="Close">${icon("x")}</button>
       </header>
       <div class="modal-body">
         <dl class="kv-list">
@@ -219,25 +227,50 @@ function showDetail(ep) {
           <dt>Health</dt><dd>${esc(ep.health?.overall || "")}</dd>
           <dt>Threats</dt><dd>${esc(ep.health?.threats?.status || "")}</dd>
           <dt>Services</dt><dd>${esc(ep.health?.services?.status || "")}</dd>
-          <dt>IPv4</dt><dd>${esc((ep.ipv4Addresses || []).join(", ") || "—")}</dd>
-          <dt>IPv6</dt><dd>${esc((ep.ipv6Addresses || []).join(", ") || "—")}</dd>
-          <dt>MAC</dt><dd>${esc((ep.macAddresses || []).join(", ") || "—")}</dd>
+          <dt>IPv4</dt><dd>${esc((ep.ipv4Addresses || []).join(", ") || "none")}</dd>
+          <dt>IPv6</dt><dd>${esc((ep.ipv6Addresses || []).join(", ") || "none")}</dd>
+          <dt>MAC</dt><dd>${esc((ep.macAddresses || []).join(", ") || "none")}</dd>
           <dt>User</dt><dd>${esc(ep.associatedPerson?.name || "")} ${esc(ep.associatedPerson?.viaLogin ? `(${ep.associatedPerson.viaLogin})` : "")}</dd>
           <dt>Tamper protection</dt><dd>${ep.tamperProtectionEnabled ? "enabled" : "disabled"}</dd>
-          <dt>Isolation</dt><dd>${esc(ep.isolation?.status || "—")}</dd>
-          <dt>Lockdown</dt><dd>${esc(ep.lockdown?.status || "—")}</dd>
-          <dt>Group</dt><dd>${esc(ep.groupName || "—")} ${ep.groupId ? `<code>${esc(ep.groupId)}</code>` : ""}</dd>
-          <dt>Last seen</dt><dd>${ep.lastSeenAt ? new Date(ep.lastSeenAt).toLocaleString() : "—"}</dd>
+          <dt>Isolation</dt><dd>${esc(ep.isolation?.status || "none")}</dd>
+          <dt>Lockdown</dt><dd>${esc(ep.lockdown?.status || "none")}</dd>
+          <dt>Group</dt><dd>${esc(ep.groupName || "none")} ${ep.groupId ? `<code>${esc(ep.groupId)}</code>` : ""}</dd>
+          <dt>Last seen</dt><dd>${ep.lastSeenAt ? new Date(ep.lastSeenAt).toLocaleString() : "never"}</dd>
         </dl>
-        <h3 style="margin-top:1rem;">Assigned products</h3>
+        <h3>Assigned products</h3>
         <ul>${products}</ul>
-        <h3 style="margin-top:1rem;">Service details</h3>
+        <h3>Service details</h3>
         <ul>${services}</ul>
       </div>
     </div>`;
   document.body.appendChild(modal);
   modal.querySelector(".modal-close").addEventListener("click", () => modal.remove());
   modal.addEventListener("click", (e) => { if (e.target === modal) modal.remove(); });
+}
+
+function staleTag(ep) {
+  const days = ep.lastSeenAt ? Math.floor((Date.now() - new Date(ep.lastSeenAt).getTime()) / 86_400_000) : null;
+  const text = days === null ? "stale, never seen" : `stale ${days}d`;
+  const why = days === null
+    ? "Never checked in. Devices must check in within 14 days to migrate."
+    : `Last seen ${days} days ago. Devices must check in within 14 days to migrate.`;
+  return `<span class="tag tag-bad" title="${escAttr(why)}">${esc(text)}</span>`;
+}
+
+function healthTag(overall) {
+  const h = String(overall || "unknown").toLowerCase();
+  if (h === "good") return `<span class="tag tag-ok">${icon("checkCircle")}Good</span>`;
+  if (h === "suspicious") return `<span class="tag tag-warn">${icon("alert")}Suspicious</span>`;
+  if (h === "bad") return `<span class="tag tag-bad">${icon("xCircle")}Bad</span>`;
+  return `<span class="tag tag-muted">${icon("help")}${esc(h.charAt(0).toUpperCase() + h.slice(1))}</span>`;
+}
+
+function osIcon(ep) {
+  const p = String(ep.os?.platform || ep.os?.name || "").toLowerCase();
+  if (p.includes("mac")) return icon("apple");
+  if (p.includes("linux") || p.includes("ubuntu") || p.includes("centos") || p.includes("red hat")) return icon("linux");
+  if (p.includes("windows")) return icon("windows");
+  return icon("device");
 }
 
 function isStale(ep) {

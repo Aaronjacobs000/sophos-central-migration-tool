@@ -16,42 +16,43 @@
 
   <main class="page-main">
     <h1>Endpoints</h1>
-    <p class="page-lead">Browse devices on both tenants. Select devices and migrate them
-      in either direction — source to destination or destination back to source.</p>
+    <p class="page-lead">Devices on both tenants. Select devices on one side and move them to the other,
+      source to destination or back again. Devices that have not checked in for 14 days cannot move.</p>
 
-    <div class="panel-toolbar" style="margin-bottom:1rem;">
-      <label class="checkbox" style="margin:0;">
+    <div class="panel-toolbar">
+      <label class="checkbox">
         <input type="checkbox" id="hide-stale" />
-        Hide stale devices (outside 14-day window)
+        Hide stale devices (outside the 14-day window)
       </label>
     </div>
 
     <div class="split-row">
-      <section class="panel-card">
+      <section class="panel-card ep-card">
         <div class="panel-toolbar">
-          <h2>Source</h2>
+          <h2 class="side-title">Source</h2>
           <span class="spacer"></span>
-          <input type="search" id="search-source" placeholder="Filter…" />
+          <input type="search" id="search-source" placeholder="Filter hostnames" />
           <button class="btn btn-small" id="select-all-source">Select all</button>
         </div>
-        <div id="table-source"><div class="empty-state">Loading…</div></div>
+        <div id="table-source"><div class="empty-state">Loading</div></div>
       </section>
-      <section class="panel-card">
+      <section class="panel-card ep-card">
         <div class="panel-toolbar">
-          <h2>Destination</h2>
+          <h2 class="side-title is-dest">Destination</h2>
           <span class="spacer"></span>
-          <input type="search" id="search-dest" placeholder="Filter…" />
+          <input type="search" id="search-dest" placeholder="Filter hostnames" />
           <button class="btn btn-small" id="select-all-dest">Select all</button>
         </div>
-        <div id="table-dest"><div class="empty-state">Loading…</div></div>
+        <div id="table-dest"><div class="empty-state">Loading</div></div>
       </section>
     </div>
   </main>
 
   <div id="selection-basket" class="selection-basket hidden">
-    <span id="basket-text"></span>
+    <span id="basket-text" class="basket-text"></span>
+    <span class="basket-sep"></span>
     <button id="basket-clear" class="btn">Clear</button>
-    <button id="basket-migrate" class="btn btn-primary">Migrate selected →</button>
+    <button id="basket-migrate" class="btn btn-primary">Migrate<span data-icon="arrowRight"></span></button>
   </div>
 
   <footer id="page-footer" class="page-footer"></footer>
