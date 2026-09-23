@@ -23,12 +23,13 @@
         <h2>What this tool does</h2>
         <p>It connects to two Sophos Fusion (formerly Sophos Central) tenants, a <strong>source</strong> and a
           <strong>destination</strong>, and moves configuration and devices between them through the public
-          Sophos APIs. It does not copy the whole tenant. You choose what moves and when, and every change is logged.</p>
+          Sophos APIs. It does not copy the whole tenant. You choose what moves and when, and copies and migrations are logged.</p>
         <ul>
-          <li><strong>Endpoint policies</strong>: list, compare settings, and clone or overwrite on the destination.</li>
-          <li><strong>Endpoint groups</strong>: mirror by name and description. Membership is not copied (see below).</li>
-          <li><strong>Exclusions and allow and block lists</strong>: copy scanning exclusions, allowed items and blocked items.</li>
-          <li><strong>Device migration</strong>: the two-tenant migration flow. Devices keep their identity and check in to the destination the next time they are online.</li>
+          <li>Endpoint policies: list, compare settings, and clone or overwrite on the destination.</li>
+          <li>Web filtering: copy site lists and profiles.</li>
+          <li>Endpoint and user groups: mirror by name and description. Members follow after a device move (see below).</li>
+          <li>Exclusions and lists: scanning, allowed and blocked items, isolation, intrusion prevention, exploit mitigation, Website Management and TLS decryption exclusions.</li>
+          <li>Device migration: the two-tenant migration flow. Devices keep their identity and check in to the destination the next time they are online.</li>
         </ul>
       </section>
 
@@ -67,22 +68,54 @@
       </section>
 
       <section class="panel-card">
+        <h2>Checks before a move</h2>
+        <p>The Start migration page runs two read-only checks:</p>
+        <ul>
+          <li>Device Migration setting: whether the sending tenant allows devices to leave, and when that ends. It warns when the window closes within a day, because devices that have not checked in by then will not move.</li>
+          <li>Destination licences: free seats against the selected computers and servers, and products the source has that the destination lacks (endpoint and server protection, XDR, MDR, Device Encryption). Product names map loosely to features, so it warns and never blocks.</li>
+        </ul>
+      </section>
+
+      <section class="panel-card">
         <h2>Group membership</h2>
-        <p>Mirroring an endpoint group copies its name and description only. Member IDs from the source mean
-          nothing in the destination, so they are left out. Devices reconstitute group membership on the
-          destination side based on its policies after they migrate.</p>
+        <p>Mirroring an endpoint group copies its name and description only, because member IDs from the source
+          mean nothing on the destination.</p>
+        <p>When you create a migration job, the tool records the group each device is in. After the move, the
+          <strong>Group membership</strong> card on the job page adds each moved device to the destination group
+          with the same name, so policies assigned to that group follow it. Mirror the groups first. Groups synced
+          from Active Directory cannot be changed through the API and are reported.</p>
+      </section>
+
+      <section class="panel-card">
+        <h2>Web filtering</h2>
+        <p>Copy site lists first, then profiles. A profile refers to site lists by ID, and the copy maps each one
+          to the destination list with the same name; a rule whose list is missing is dropped and reported.</p>
+        <p>When you clone a web control policy that uses a profile, the tool maps the profile ID to the destination
+          profile with the same name. With no such profile the setting is dropped and the result says so.</p>
+      </section>
+
+      <section class="panel-card">
+        <h2>Order of work</h2>
+        <ol>
+          <li>Website Management entries (Exclusions page), because web control policies refer to their tags.</li>
+          <li>Web filtering site lists, then profiles.</li>
+          <li>Groups and policies.</li>
+          <li>Other exclusions and lists.</li>
+          <li>Devices, then group membership from the job page.</li>
+        </ol>
       </section>
 
       <section class="panel-card">
         <h2>Dry runs</h2>
-        <p>Every migration action (policies, groups, exclusions and device migrations) supports a dry run that
-          returns the plan the server <em>would</em> carry out without touching the destination. Use it the first
-          few times until you are comfortable with what gets created.</p>
+        <p>Every migration action (policies, groups, exclusions, web filtering, device migrations and group
+          membership) supports a dry run that returns the plan the server <em>would</em> carry out without touching
+          the destination. The Preview buttons run it. Use it the first few times until you are comfortable with
+          what gets created.</p>
       </section>
 
       <section class="panel-card">
         <h2>Audit log</h2>
-        <p>Every change to either tenant is written as a JSON line to <code>data/audit.log</code> with a
+        <p>Copies, clones and migrations are written as JSON lines to <code>data/audit.log</code> with a
           timestamp, request ID, side, resource ID, and the result or error. Keep it for change control.</p>
       </section>
 

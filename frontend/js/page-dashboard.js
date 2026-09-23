@@ -236,10 +236,10 @@ function renderJourney(data) {
     config = { state: "loading", tag: "Waiting", lines: ["Counts appear once both tenants have loaded."] };
   } else {
     const lines = [];
-    let todo = 0;
+    let toReview = 0;
     if (data.policyCounts) {
       const c = data.policyCounts;
-      todo += c.differ + c.sourceOnly;
+      toReview += c.differ + c.sourceOnly;
       const parts = [];
       if (c.differ) parts.push(`<b>${c.differ}</b> differ`);
       if (c.sourceOnly) parts.push(`<b>${c.sourceOnly}</b> source only`);
@@ -249,16 +249,16 @@ function renderJourney(data) {
       lines.push(`Policies: ${data.deep?.error ? "comparison failed" : "comparing"}`);
     }
     if (data.groupsMissing !== null) {
-      todo += data.groupsMissing;
+      toReview += data.groupsMissing;
       lines.push(`Groups: ${data.groupsMissing ? `<b>${data.groupsMissing}</b> not on destination` : "all present"}`);
     }
     if (data.exclusionsMissing !== null) {
-      todo += data.exclusionsMissing;
+      toReview += data.exclusionsMissing;
       lines.push(`Exclusions: ${data.exclusionsMissing ? `<b>${data.exclusionsMissing}</b> not on destination` : "all present"}`);
     }
     config = {
-      state: todo ? "warn" : data.policyCounts ? "ok" : "loading",
-      tag: todo ? `${todo} to review` : data.policyCounts ? "In step" : "Comparing",
+      state: toReview ? "warn" : data.policyCounts ? "ok" : "loading",
+      tag: toReview ? `${toReview} to review` : data.policyCounts ? "In step" : "Comparing",
       lines,
     };
   }

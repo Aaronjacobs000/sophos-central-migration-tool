@@ -44,3 +44,13 @@ exact commit SHA at the time of the copy.
   ported from upstream commit 89a43af. The Licensing API needs it.
 - **`sophos.ts` (types)** is a fork: removed `SophosTenant`,
   `SophosTenantPage`, and `SophosIdType` (unused after the resolver fork).
+
+## Fonts
+
+`frontend/fonts/` bundles two fonts under the SIL Open Font License 1.1. The
+licence texts sit next to the font files.
+
+| Font | Source | Licence file |
+| --- | --- | --- |
+| Inter (variable, Latin subset) | [rsms/inter](https://github.com/rsms/inter) | `frontend/fonts/OFL-Inter.txt` |
+| Geist Mono (variable, Latin subset) | [vercel/geist-font](https://github.com/vercel/geist-font) | `frontend/fonts/OFL-GeistMono.txt` |

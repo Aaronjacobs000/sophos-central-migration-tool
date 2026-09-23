@@ -5,73 +5,69 @@
 > Sophos. It calls the public Sophos APIs using credentials you supply. Use it at your own
 > risk, and raise problems as issues on this repository rather than with Sophos support.
 
-A locally-run web tool for migrating configuration and devices between two Sophos Fusion (formerly Sophos Central) tenants.
+A locally run web tool for moving configuration and devices between two Sophos Fusion (formerly Sophos Central) tenants.
 
-Connects to a **source** and **destination** tenant via the public Sophos Fusion APIs, provides a side-by-side view of policies, groups, exclusions, and endpoints, and lets you migrate selected items in a controlled, auditable way. That includes the two-tenant device migration flow with live progress tracking.
+It connects to a source and a destination tenant through the public Sophos Fusion APIs, shows policies, groups, exclusions, web filtering and devices side by side, and moves the items you pick. Copies and migrations can be previewed with a dry run first, and they are recorded in an audit log. Device moves use the two-tenant migration flow and show each device's progress live.
 
-![Dark-themed UI matching the Sophos Central dashboard](docs/screenshot-placeholder.png)
+![Dashboard showing the source to destination route, the four migration steps and the preload counts](docs/screenshot.png)
 
 ## Features
 
-### Credential modes
+### Connecting
 
-The tool supports two ways to connect:
+There are two ways to connect:
 
-- **Direct tenant mode** — enter a separate Client ID and Client Secret for the source and destination tenants. Create these in each tenant under *Global Settings > API Credentials*.
-- **Partner / organization mode** — enter a single set of partner or organization API credentials that manage multiple tenants. The tool loads the full tenant list and lets you pick source and destination from a dropdown. Includes a **Partner Explorer** page for browsing all managed tenants and searching for endpoints across every tenant.
+- Direct tenant mode: a Client ID and Client Secret for each tenant, created under *Global Settings > API Credentials*.
+- Partner or organization mode: one partner or organization credential that manages both tenants. The tool loads the tenant list and you pick the source and destination. The Partner Explorer page lists every managed tenant and searches for devices across all of them.
 
-A first-run welcome wizard walks you through either mode, tests the connection before saving, and stores everything in a local `.env` file.
+A first-run wizard walks through either mode, tests the connection before saving, and stores the result in a local `.env` file.
 
-### Configuration comparison and migration
+### Policies
 
-- **Endpoint policies** — listed by product type (Threat Protection, Web Control, Peripheral Control, etc.) with source and destination side-by-side. Per-policy deep-match badges show whether settings are identical, how many differences exist, or whether a policy only exists on one side. Click **Compare** for a full side-by-side settings table grouped by top-level key, with status pills (match / differs / source only / dest only) and a toggle between "differences only" and "all settings". Clone individual policies or bulk-select and clone to destination. Delete policies from the destination tenant with double confirmation.
-- **Endpoint groups + user groups** — tabbed view separating endpoint groups (`/endpoint/v1/endpoint-groups`) and user/directory groups (`/common/v1/directory/user-groups`). Source-vs-destination side-by-side with badges for groups that only exist on one side. Mirror selected groups to destination (name and metadata only — membership is not transferred; devices reconstitute group membership after migration). Delete from destination.
-- **Scanning exclusions, allowed items, blocked items** — tabbed view with source-vs-destination tables per category. Select individual items or use Select All, then copy to destination. Duplicate detection prevents creating items that already exist on the dest side. Delete from destination.
-- **Dry-run mode** on every migration action — preview exactly what would be created, overwritten, or skipped without touching the destination.
-- **"Hide fully matching products" toggle** on the policies page — runs a background deep-match analysis (fetching full settings for every paired policy) and only shows products with actual differences. Uses a server-side cache invalidated on credential or policy changes.
+Endpoint policies are grouped by product, source on the left and destination on the right. A deep match reads the full settings of every policy that exists on both sides, and each product shows a small bar of how many policies match, differ, or exist on one side only. You can hide products where everything matches.
+
+Compare opens one table of settings grouped by section, with readable labels (the raw setting key shows when you hover a row). Clone copies a source-only policy to the destination, and Compare offers to overwrite a destination policy with the source version. Destination policies can be deleted from a row menu after a double confirmation.
+
+Policy assignments cannot be migrated because the public API rejects every `appliesTo` write. Export assignments (CSV) lists them so you can reassign them by hand.
+
+When a web control policy points at a web filtering profile, the clone maps the profile ID to the destination profile with the same name. If the destination has no such profile, the setting is dropped and the result says so.
+
+### Web filtering
+
+Site lists and web filtering profiles copy to the destination. Copy site lists first: a profile refers to site lists by ID, and the copy maps each one to the destination list with the same name. Profile links to policies are not copied; cloning the web control policy makes the link.
+
+### Groups
+
+Endpoint groups and user groups mirror to the destination by name and description. Members are not copied, because source device IDs mean nothing on the destination. After a device move, the job page can add each moved device to the destination group with the same name as its source group, so policies assigned to that group follow it.
+
+### Exclusions and lists
+
+Eight global lists copy with the same duplicate check: scanning exclusions, allowed items, blocked items, isolation exclusions, intrusion prevention exclusions, custom exploit mitigation applications, Website Management entries, and websites excluded from TLS decryption. Rows that already exist on both sides are dimmed. Copy the Website Management entries before cloning web control policies, because those policies refer to their tags.
 
 ### Device migration
 
-- **Bidirectional** — migrate devices from source to destination, or from destination back to source (in case you move a machine by mistake).
-- **Both tenants visible** — the endpoints page shows source and destination devices side-by-side with hostname, OS, health, IP, associated user, and relative "last seen" timestamps.
-- **14-day window enforcement** — devices that haven't checked in within 14 days are flagged as "stale" and cannot be selected for migration. A global toggle lets you hide stale devices entirely. The server also runs a preflight check and rejects any stale endpoints before creating jobs.
-- **Select All** — select all eligible (non-stale) devices on either side, respecting the current hostname filter.
-- **Endpoint detail modal** — click Detail on any device to see the full Sophos API response: ID, type, OS version, is-server flag, health breakdown (threats + services + individual service details), IPv4/IPv6/MAC addresses, associated person, tamper protection, isolation, lockdown, group, assigned products with versions and status, and last seen.
-- **Two-tenant migration flow** — uses the official `/endpoint/v1/migrations` API. The tool POSTs a receiver job on the target tenant (with `fromTenant` + `endpoints`), then PUTs to the same job ID on the source tenant (with `token` + `endpoints`) to trigger the sender. Both sides are polled every 10 seconds via Server-Sent Events, and per-device status is shown live in the browser. Completion is derived from per-endpoint statuses (`succeeded` / `failed` / `pending`).
-- **All migrations view**: the migration jobs page queries both tenant APIs and merges the results with locally-tracked jobs. Migrations started from the Sophos Fusion console, other tools, or other workstations are visible alongside your own, with origin badges to distinguish them.
-- **Prerequisite check** — the migration page warns that Device Migration must be enabled on the sending tenant (Global Settings > Device Migration) before starting, and surfaces a specific fix message if the API returns a 403.
-- **Migration job history** — all jobs are persisted to `data/migration-jobs.json` so you can reopen a job detail page after a browser refresh or server restart. Cancel any in-flight job (deletes both upstream Sophos jobs with double confirmation).
+- Moves devices from source to destination, or back again if something moved by mistake.
+- Shows both tenants' devices with OS, health, IP, user and last-seen time. Devices that have not checked in for 14 days are marked stale and cannot be selected, and the server checks the window again before it creates a job.
+- Before you start, the Start migration page reads the Device Migration setting on the sending tenant and says whether it is on, when it ends, or whether it closes within a day.
+- It also reads both tenants' licences, compares the destination's free seats with the selected computers and servers, and flags products the source has that the destination lacks (endpoint and server protection, XDR, MDR, Device Encryption). Product names map loosely to features, so this warns and never blocks.
+- A dry run shows the calls the real run would make, and the groups the selected devices are in.
+- The job page follows both sides through a server-sent event stream, with a progress bar and a row per device.
+- The Migrations page merges jobs from both tenants' APIs with the ones started here, so moves started in the Sophos Fusion console or from another workstation show too.
+- Jobs are kept in `data/migration-jobs.json`, so a job page still opens after a browser refresh or a server restart. Cancelling a job deletes both upstream jobs after you confirm.
 
-### Partner Explorer
+### Around the tool
 
-Available when using partner or organization credentials:
-
-- **Tenant list** — browse all managed tenants with name, tenant ID, region, and geography. Filter by name. Sortable columns.
-- **Global endpoint search** — search by hostname across every managed tenant in one query (5-concurrent fan-out). Results show which tenant each device belongs to, with "source" / "dest" / "other" badges.
-- **Tenant drill-down** — click Explore on any tenant to open a detail panel where you can search endpoints within that specific tenant.
-
-### Observability
-
-- **Dashboard** — shows connection status for both tenants (label, tenant ID, region, API host) and a preload status grid. After credentials are saved, the server preloads policies, groups, exclusions, and endpoints for both sides in the background. The grid shows per-section status (loaded / loading / failed / idle), item counts, and duration. Per-row Refresh buttons let you retry failed sections. A "Restart preload" button re-fetches everything.
-- **Logs page** — in-memory ring buffer (last 500 entries) with timestamp, level, section, side, and message. Filter by section (preload, state, credentials, compare, migration), side (source / dest), level (info / warn / error), or free-text search. Auto-refreshes every 4 seconds with a toggle. Sortable columns.
-- **Audit log** — every mutation against either tenant is recorded as a JSON line in `data/audit.log` with a unique ID, timestamp, side, tenant ID, action, resource type, resource ID, success/failure, and detail payload.
-
-### UI
-
-- Dark theme matching the Sophos Central dashboard (Inter font, navy gradient background, white Sophos logo).
-- Sticky top navigation with tenant status pills showing the friendly label (or short tenant ID). Partner Explorer link only appears in partner mode.
-- Sortable table columns on every page — click any column header to sort ascending, click again to reverse.
-- Selection baskets with bulk actions (clone, mirror, copy, migrate).
-- Toast notifications for success/error feedback.
-- All pages are plain HTML + ES modules — no React, no build step for the frontend. Edit a file, refresh the browser.
+- The dashboard shows the route, a four-step checklist (connect, configuration, devices, verify) with live counts, and the preload state of each data section with a refresh button per tenant.
+- Ctrl K opens a palette for going to any page or finding a device by hostname.
+- The Logs page shows the last 500 server log lines with filters. Copies, clones and migrations are also written to `data/audit.log`.
 
 ## Prerequisites
 
-- **Node.js 20** or newer
-- **Sophos Fusion (formerly Sophos Central) API credentials**, either:
-  - **Direct tenant mode**: a Client ID + Client Secret created in each tenant under *Global Settings > API Credentials* (Super Admin role recommended)
-  - **Partner mode**: a single partner or organization API credential set that manages both tenants
-- For device migration: ensure **Device Migration is enabled** on the **sending** tenant in *Global Settings > Device Migration*
+- Node.js 20 or newer.
+- Sophos Fusion (formerly Sophos Central) API credentials, either:
+  - a Client ID and Client Secret created in each tenant under *Global Settings > API Credentials* (Super Admin role recommended), or
+  - one partner or organization credential that manages both tenants.
+- For device moves, Device Migration turned on in the sending tenant under *Global Settings > Device Migration*.
 
 ## Quick start
 
@@ -82,7 +78,7 @@ npm install
 npm start
 ```
 
-Open http://127.0.0.1:3100 in your browser. The welcome wizard will guide you through entering credentials (direct or partner mode), testing the connection, and saving the configuration.
+Open http://127.0.0.1:3100. The welcome wizard asks for credentials, tests them and saves them.
 
 To use a different port:
 
@@ -90,93 +86,79 @@ To use a different port:
 PORT=3200 npm start
 ```
 
+To run the tests (they use a fake Sophos API and never touch a tenant):
+
+```bash
+npm test
+```
+
 ## How device migration works
 
 The Sophos device migration API (`/endpoint/v1/migrations`) uses a two-tenant handshake:
 
-1. **Enable migration**: Device Migration must be turned on in the sending tenant's Sophos Fusion console (*Overview > Global Settings > Device Migration*). The tool displays a prerequisite banner and surfaces a specific error if this step is missed.
-2. **Receiver job** — `POST /endpoint/v1/migrations` on the receiving (destination) tenant with `fromTenant` (the sending tenant's UUID) and `endpoints` (the device UUIDs to migrate). The response includes the job `id` and a handshake `token`.
-3. **Sender trigger** — `PUT /endpoint/v1/migrations/{jobId}` on the sending (source) tenant using the same job ID, with `token` (from the receiver response) and `endpoints`. This triggers the migration — it does not create a separate job.
-4. **Polling** — the tool polls both sides every 10 seconds and pushes status updates to the browser via Server-Sent Events. Per-endpoint status transitions through `pending` → `succeeded` (or `failed`). Aggregate job status is derived from endpoint-level results since the Sophos API does not populate a top-level job status field.
-5. **14-day window** — devices must check in with Sophos within 14 days for the migration to land. The tool enforces this at selection time (greying out stale devices) and at preflight (rejecting them server-side before creating jobs).
+1. Pre-flight: Device Migration must be on in the sending tenant's Sophos Fusion console (*Overview > Global Settings > Device Migration*). The tool reads it with `GET /endpoint/v1/settings/migration` and shows the result before you start.
+2. Receiver job: `POST /endpoint/v1/migrations` on the receiving tenant with `fromTenant` (the sending tenant's ID) and `endpoints` (the device IDs). The response has the job `id` and a handshake `token`.
+3. Sender trigger: `PUT /endpoint/v1/migrations/{jobId}` on the sending tenant with the same job ID, the `token` and the `endpoints`. This starts the move; it does not create a second job.
+4. Polling: both sides are polled every 10 seconds and the browser gets the updates as server-sent events. Each device goes from `pending` to `succeeded` or `failed`. The job's overall status comes from the device results, because the API does not fill in a job-level status.
+5. Group membership: `GET /endpoint/v1/migrations/{jobId}/endpoints` returns each moved device's `newId`. The job page adds the new IDs to the destination groups named like the devices' source groups with `POST /endpoint/v1/endpoint-groups/{id}/endpoints`. The source groups are recorded when the job is created, because the sending tenant stops listing a device once it has moved.
+6. The 14-day window: devices must check in within 14 days for the move to land. The tool blocks stale devices when you select them and again before it creates the jobs.
 
-The tool handles both directions (source→dest and dest→source) for cases where you need to move a device back.
+The tool works in both directions, source to destination and back.
 
 ## Project layout
 
 ```
 backend/
   src/
-    server.ts                    # Express entry point, route mounting, static serving
-    state.ts                     # AppState singleton, dual-mode (direct/partner) context management
+    server.ts                    # Express entry point, route mounting, static files
+    state.ts                     # App state, direct and partner mode contexts
     log.ts                       # Ring-buffer logger with secret masking
-    config/
-      env-file.ts                # Atomic .env read/write preserving comments
-      validate.ts                # Credential extraction, masking, mode detection
+    config/                      # .env read and write, credential checks and masking
     sophos/
-      constants.ts               # Sophos auth URL + global API base URL
-      tenant-context.ts          # createDirectContext, createPartnerContext, partnerSideContext
-      auth/token-manager.ts      # OAuth2 client credentials + auto-refresh (from sophos-mcp)
+      constants.ts               # Sophos auth URL and global API host
+      tenant-context.ts          # Direct and partner tenant contexts
+      auth/token-manager.ts      # OAuth2 client credentials and refresh (from sophos-mcp)
       client/
-        sophos-client.ts         # HTTP client with retry, rate-limit, region routing (from sophos-mcp)
-        tenant-resolver.ts       # /whoami + tenant list + regional host cache (from sophos-mcp)
-      types/
-        sophos.ts                # Sophos API response types (from sophos-mcp)
-        migration.ts             # Policy, group, exclusion, migration job types
-      api/
-        policies.ts              # /endpoint/v1/policies wrappers
-        groups.ts                # /endpoint/v1/endpoint-groups wrappers
-        user-groups.ts           # /common/v1/directory/user-groups wrappers
-        exclusions.ts            # Scanning exclusions + allowed/blocked items wrappers
-        endpoints.ts             # /endpoint/v1/endpoints (list, get, pagination)
-        migrations.ts            # /endpoint/v1/migrations (receiver + sender + polling)
-    routes/                      # Express route modules
-    services/                    # Business logic (policy-migrator, group-mirror, device-migrator, etc.)
-    compare/
-      json-diff.ts               # Structural deep-diff engine (~100 lines, no deps)
-    middleware/                   # requireConfigured, sideParam, errorHandler
+        sophos-client.ts         # HTTP client with retry, rate limits, region routing (from sophos-mcp)
+        tenant-resolver.ts       # /whoami, tenant list, regional host cache (from sophos-mcp)
+      types/                     # API response types
+      api/                       # One wrapper per API: policies, groups, exclusions,
+                                 # endpoints, migrations, web filters, licences, settings
+    routes/                      # Express routes
+    services/                    # Policy, group, exclusion and web filter copies, device
+                                 # migration, group membership, pre-flight and licence checks
+    compare/json-diff.ts         # Small structural diff
+    middleware/                  # requireConfigured, sideParam, errorHandler
 
-frontend/                        # Vanilla HTML + ES modules, no build step
-  welcome.html                   # First-run wizard (mode picker, credential entry, tenant selector)
-  index.html                     # Dashboard with preload status grid
-  policies.html                  # Product-grouped policy comparison
-  policy-compare.html            # Side-by-side settings diff table
-  policy-detail.html             # Single policy viewer
-  groups.html                    # Endpoint groups + user groups (tabbed)
-  exclusions.html                # Scanning / allowed / blocked (tabbed)
-  endpoints.html                 # Source + dest devices, bidirectional selection
-  migrate.html                   # Migration review + dry-run + launch
-  migrate-jobs.html              # Job history
-  migrate-job-detail.html        # Live SSE status
-  partner-explorer.html          # Tenant list + global endpoint search (partner mode)
-  search.html                    # Standalone endpoint search
-  credentials.html               # Mode toggle + credential editor
-  logs.html                      # Ring-buffer log viewer with filters
-  help.html                      # Prerequisites, workflow, caveats
-  css/base.css                   # Dark Sophos Central theme tokens
-  css/components.css             # All component styles
-  js/                            # One module per page + shared utilities
+frontend/                        # Plain HTML and ES modules, no build step
+  *.html                         # One page per screen
+  css/base.css                   # Design tokens; the accent is one variable, --accent
+  css/components.css             # Shell, cards, tables, tags and page styles
+  js/                            # One module per page, plus nav, icons and shared helpers
+  fonts/                         # Inter and Geist Mono, with their licences
 
-data/                            # gitignored, created at runtime
-  migration-jobs.json            # Local migration job state
-  audit.log                      # Append-only mutation log
+test/                            # node:test suites against a fake Sophos API
 
-.env                             # gitignored, managed by the UI
-.env.example                     # Committed template with all supported keys
+data/                            # Created at run time, not committed
+  migration-jobs.json            # Local migration jobs
+  audit.log                      # Copies, clones and migrations
+
+.env                             # Not committed, managed by the UI
+.env.example                     # Template with every supported key
 ```
 
 ## Security
 
-- The server binds to **127.0.0.1 only** — it is not reachable from the network.
-- Credentials are stored in **plain text** in `.env` at the repo root. Run only on a trusted workstation with full-disk encryption. Do not commit, back up, or sync `.env` to cloud drives. `.gitignore` excludes it.
-- Secrets are **never returned** by the API. The credentials page shows masked values until you click Reveal.
-- Every migration action supports **dry-run** mode that returns the exact planned API calls without touching the destination.
-- Every mutation is recorded to `data/audit.log` with timestamp, request ID, side, tenant ID, resource, and result.
-- **Destructive actions** (delete policy/group/exclusion, overwrite policy, cancel migration) require explicit double confirmation.
+- The server listens on **127.0.0.1 only**, so it is not reachable from the network.
+- Credentials are stored in **plain text** in `.env` at the repo root. Run the tool only on a trusted workstation with full-disk encryption, and do not commit, back up or sync `.env` to cloud drives. `.gitignore` excludes it.
+- The API never returns secrets. The credentials page shows masked values.
+- Copies and migrations can be run as a dry run first, which returns what would be created or changed without touching the destination.
+- Copies, clones and migrations are recorded in `data/audit.log` with a timestamp, ID, side, tenant ID, resource and result.
+- Deleting a policy, group or exclusion asks for confirmation twice. Overwriting a policy and cancelling a migration ask once.
 
 ## Credits
 
-Core Sophos API client code (OAuth2 token manager, HTTP client with retry/rate-limiting, tenant resolver with regional routing) is vendored from [sophos-mcp](https://github.com/Aaronjacobs000/sophos-mcp) (formerly sophos-central-mcp, MIT License). See [ATTRIBUTIONS.md](ATTRIBUTIONS.md) for details.
+The core Sophos API client code (OAuth2 token manager, HTTP client with retry and rate limiting, tenant resolver with regional routing) is vendored from [sophos-mcp](https://github.com/Aaronjacobs000/sophos-mcp) (formerly sophos-central-mcp, MIT License). The Inter and Geist Mono fonts are bundled under the SIL Open Font License. See [ATTRIBUTIONS.md](ATTRIBUTIONS.md).
 
 ## License
 
