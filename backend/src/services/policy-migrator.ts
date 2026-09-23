@@ -276,7 +276,11 @@ export async function remapWebProfiles(
     const v = (settings[k] as { value?: unknown } | undefined)?.value;
     return k.endsWith(WEB_PROFILE_ID_SUFFIX) && typeof v === "string" && v.length > 0;
   });
-  const scheduleKeys = Object.keys(settings).filter((k) => k.endsWith(WEB_PROFILE_SCHEDULES_SUFFIX));
+  const scheduleKeys = Object.keys(settings).filter((k) => {
+    if (!k.endsWith(WEB_PROFILE_SCHEDULES_SUFFIX)) return false;
+    const v = (settings[k] as { value?: unknown } | undefined)?.value;
+    return Array.isArray(v) ? v.length > 0 : v !== undefined && v !== null && v !== "";
+  });
   if (idKeys.length === 0 && scheduleKeys.length === 0) return;
 
   let map: WebProfileMap;

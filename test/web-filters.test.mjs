@@ -177,7 +177,10 @@ test("policy clone: a profile missing on the destination drops the setting and s
 test("policy clone: policies without a web profile make no profile lookups", async () => {
   seedPolicies();
   policies.src.push({ id: "pol-3", name: "Base TP", type: "threat-protection", settings: { "endpoint.threat-protection.amsi.enabled": { value: true } } });
+  // As the live API returns it for a policy that does not use web profiles.
+  policies.src.push({ id: "pol-4", name: "Legacy web", type: "web-control", settings: { [PROFILE_KEY]: { value: "" }, [SCHEDULE_KEY]: { value: [] } } });
   fake.reset();
-  await migratePolicies({ policyIds: ["pol-3"], dryRun: true });
+  const res = await migratePolicies({ policyIds: ["pol-3", "pol-4"], dryRun: true });
+  assert.equal(res[1].adjustments, undefined);
   assert.equal(fake.calls.filter((c) => c.path === "/web-filters/v1/profiles").length, 0);
 });
