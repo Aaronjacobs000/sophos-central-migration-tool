@@ -23,6 +23,11 @@
       <button class="seg-btn active" role="tab" data-tab="scanning">Scanning exclusions <span class="seg-count" data-count="scanning"></span></button>
       <button class="seg-btn" role="tab" data-tab="allowed-items">Allowed items <span class="seg-count" data-count="allowed-items"></span></button>
       <button class="seg-btn" role="tab" data-tab="blocked-items">Blocked items <span class="seg-count" data-count="blocked-items"></span></button>
+      <button class="seg-btn" role="tab" data-tab="isolation">Isolation <span class="seg-count" data-count="isolation"></span></button>
+      <button class="seg-btn" role="tab" data-tab="intrusion-prevention">Intrusion prevention <span class="seg-count" data-count="intrusion-prevention"></span></button>
+      <button class="seg-btn" role="tab" data-tab="exploit-mitigation">Exploit mitigation <span class="seg-count" data-count="exploit-mitigation"></span></button>
+      <button class="seg-btn" role="tab" data-tab="local-sites">Website management <span class="seg-count" data-count="local-sites"></span></button>
+      <button class="seg-btn" role="tab" data-tab="tls-excluded-websites">TLS decryption <span class="seg-count" data-count="tls-excluded-websites"></span></button>
     </div>
 
     <div class="split-row">
@@ -48,6 +53,7 @@
   <div id="selection-basket" class="selection-basket hidden">
     <span class="basket-text"><strong id="basket-count">0</strong> <span id="basket-noun">source items selected</span></span>
     <span class="basket-sep"></span>
+    <button id="basket-preview" class="btn">Preview</button>
     <button id="basket-copy" class="btn btn-primary">Copy to destination</button>
   </div>
 

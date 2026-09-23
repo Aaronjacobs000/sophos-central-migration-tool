@@ -12,6 +12,7 @@ import {
   deleteAllowedItem,
   deleteBlockedItem,
 } from "../sophos/api/exclusions.js";
+import { listForType } from "../services/exclusion-copier.js";
 
 export const exclusionsRouter = Router();
 
@@ -46,6 +47,20 @@ exclusionsRouter.get("/:side/exclusions/blocked-items", async (_req, res, next) 
     next(err);
   }
 });
+
+// Read-only lists for the exclusion types added in 0.2.0. Copies go through
+// POST /api/migrate/exclusions, which checks for duplicates and audits.
+for (const type of ["isolation", "intrusion-prevention", "exploit-mitigation", "local-sites", "tls-excluded-websites"] as const) {
+  exclusionsRouter.get(`/:side/exclusions/${type}`, async (_req, res, next) => {
+    try {
+      const ctx = res.locals.tenantContext!;
+      const items = await listForType(type, ctx.client, ctx.tenantId);
+      res.json({ items });
+    } catch (err) {
+      next(err);
+    }
+  });
+}
 
 exclusionsRouter.post("/:side/exclusions/scanning", async (req, res, next) => {
   try {

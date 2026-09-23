@@ -3,22 +3,44 @@ import { api } from "./api.js";
 import { toast } from "./toast.js";
 import { getCachedSection, refreshSection } from "./preload-client.js";
 import { makeSortable } from "./sortable.js";
-import { rowMenu, wireRowMenus } from "./ui.js";
+import { rowMenu, wireRowMenus, esc, plural } from "./ui.js";
+import { icon } from "./icons.js";
 
+// The first three types come from the preload cache and can be deleted on
+// the destination. The rest are read on demand and are copy only.
 const TABS = [
-  { id: "scanning", section: "scanning-exclusions" },
-  { id: "allowed-items", section: "allowed-items" },
-  { id: "blocked-items", section: "blocked-items" },
+  { id: "scanning", section: "scanning-exclusions", label: "scanning exclusion" },
+  { id: "allowed-items", section: "allowed-items", label: "allowed item" },
+  { id: "blocked-items", section: "blocked-items", label: "blocked item" },
+  { id: "isolation", section: null, label: "isolation exclusion" },
+  { id: "intrusion-prevention", section: null, label: "intrusion prevention exclusion" },
+  { id: "exploit-mitigation", section: null, label: "exploit mitigation application" },
+  { id: "local-sites", section: null, label: "website" },
+  { id: "tls-excluded-websites", section: null, label: "TLS decryption exclusion" },
 ];
+const LEGACY = new Set(["scanning", "allowed-items", "blocked-items"]);
+const NOTES = {
+  isolation: "Addresses that stay reachable while a device is isolated.",
+  "intrusion-prevention": "Traffic that intrusion prevention does not inspect.",
+  "exploit-mitigation": "Custom applications only. Detected applications are found by the agent on each tenant and are not copied.",
+  "local-sites": "Website Management entries. Copy these before cloning web control policies, because policies refer to their tags.",
+  "tls-excluded-websites": "Websites excluded from SSL/TLS decryption.",
+};
 const state = {
   activeTab: "scanning",
-  data: {
-    "scanning": { source: [], dest: [] },
-    "allowed-items": { source: [], dest: [] },
-    "blocked-items": { source: [], dest: [] },
-  },
+  data: Object.fromEntries(TABS.map((t) => [t.id, { source: [], dest: [] }])),
   selectedSource: new Set(), // keyed by `${type}::${id}`
 };
+
+// Websites excluded from TLS decryption have no ID; the value identifies them.
+function idOf(type, item) {
+  return type === "tls-excluded-websites" ? String(item.value ?? "") : String(item.id ?? "");
+}
+
+function splitKey(key) {
+  const i = key.indexOf("::");
+  return [key.slice(0, i), key.slice(i + 2)];
+}
 
 async function boot() {
   wireTabs();
@@ -33,10 +55,11 @@ function wireSelectAll() {
     const type = state.activeTab;
     const data = state.data[type].source;
     if (!Array.isArray(data)) return;
-    for (const it of data) state.selectedSource.add(`${type}::${it.id}`);
+    for (const it of data) state.selectedSource.add(`${type}::${idOf(type, it)}`);
     renderActive();
     renderBasket();
-    toast(`Selected ${data.length} ${type} item${data.length === 1 ? "" : "s"}.`, "ok");
+    const tab = TABS.find((t) => t.id === type);
+    toast(`Selected ${plural(data.length, tab.label)}.`, "ok");
   });
   document.getElementById("clear-source").addEventListener("click", () => {
     // Clear only items in the active tab
@@ -50,6 +73,15 @@ function wireSelectAll() {
 }
 
 async function loadSide(side, tab) {
+  if (!tab.section) {
+    try {
+      const res = await api.get(`/api/${side}/exclusions/${tab.id}`);
+      state.data[tab.id][side] = res.items || [];
+    } catch (err) {
+      state.data[tab.id][side] = { error: err.message };
+    }
+    return;
+  }
   try {
     const cached = await getCachedSection(side, tab.section);
     if (cached.status?.state === "ok") {
@@ -84,6 +116,77 @@ function renderActive() {
 }
 
 // Same identity the server's duplicate check uses, so dimming matches what a copy would skip.
+function keyFor(type, item) {
+  const sorted = (list) => (Array.isArray(list) ? list.map((x) => String(x).toLowerCase()).sort().join(",") : "");
+  switch (type) {
+    case "isolation":
+    case "intrusion-prevention":
+      return [String(item.direction ?? "").toLowerCase(), sorted(item.remoteAddresses), sorted(item.localPorts), sorted(item.remotePorts)].join("|");
+    case "exploit-mitigation":
+      return sorted(item.paths);
+    case "local-sites":
+      return String(item.url ?? "").trim().toLowerCase();
+    case "tls-excluded-websites":
+      return String(item.value ?? "").trim().toLowerCase();
+    default:
+      return itemKey(item);
+  }
+}
+
+// Column layout per type: header labels and the cells for one item.
+function columnsFor(type) {
+  const list = (v) => (Array.isArray(v) && v.length ? v.join(", ") : "any");
+  switch (type) {
+    case "isolation":
+    case "intrusion-prevention":
+      return {
+        head: ["Direction", "Remote address", "Ports", "Comment"],
+        cells: (it) => [
+          `<span class="tag tag-muted">${escapeHtml(it.direction || "")}</span>`,
+          `<span class="mono-cell">${escapeHtml(list(it.remoteAddresses))}</span>`,
+          `<span class="hint">local ${escapeHtml(list(it.localPorts))} · remote ${escapeHtml(list(it.remotePorts))}</span>`,
+          `<span class="hint">${escapeHtml(it.comment || "")}</span>`,
+        ],
+      };
+    case "exploit-mitigation":
+      return {
+        head: ["Application", "Path"],
+        cells: (it) => [
+          `<span class="cell-name">${escapeHtml(it.name || "")}</span>`,
+          `<span class="mono-cell">${escapeHtml((it.paths || []).join(", "))}</span>`,
+        ],
+      };
+    case "local-sites":
+      return {
+        head: ["Website", "Tags or category", "Comment"],
+        cells: (it) => [
+          `<span class="mono-cell">${escapeHtml(it.url || "")}</span>`,
+          (it.tags || []).length
+            ? it.tags.map((t) => `<span class="tag tag-muted">${escapeHtml(t)}</span>`).join(" ")
+            : it.categoryId != null ? `<span class="hint">category ${escapeHtml(String(it.categoryId))}</span>` : "",
+          `<span class="hint">${escapeHtml(it.comment || "")}</span>`,
+        ],
+      };
+    case "tls-excluded-websites":
+      return {
+        head: ["Website", "Comment"],
+        cells: (it) => [
+          `<span class="mono-cell">${escapeHtml(it.value || "")}</span>`,
+          `<span class="hint">${escapeHtml(it.comment || "")}</span>`,
+        ],
+      };
+    default:
+      return {
+        head: ["Kind", "Value", "Comment"],
+        cells: (it) => [
+          `<span class="tag tag-muted">${escapeHtml(it.type || "")}</span>`,
+          `<span class="mono-cell">${type === "scanning" ? escapeHtml(it.value || "") : escapeHtml(formatItemValue(it))}</span>`,
+          `<span class="hint">${escapeHtml(it.comment || "")}</span>`,
+        ],
+      };
+  }
+}
+
 function itemKey(item) {
   if (item.value !== undefined) return `${item.type}::${item.value}`;
   if (item.properties !== undefined) return `${item.type}::${stableStringify(item.properties)}`;
@@ -106,46 +209,46 @@ function renderTable(side) {
     return;
   }
   if (data && data.loading) {
-    target.innerHTML = `<div class="empty-state">Preload still in progress…</div>`;
+    target.innerHTML = `<div class="empty-state">Preload is still running.</div>`;
     return;
   }
   const items = Array.isArray(data) ? data : [];
+  const note = side === "source" && NOTES[type] ? `<p class="hint tab-note">${escapeHtml(NOTES[type])}</p>` : "";
   if (items.length === 0) {
-    target.innerHTML = `<div class="empty-state">No items.</div>`;
+    target.innerHTML = `${note}<div class="empty-state">No items.</div>`;
     return;
   }
   const other = state.data[type][side === "source" ? "dest" : "source"];
-  const otherKeys = new Set(Array.isArray(other) ? other.map(itemKey) : []);
+  const otherKeys = new Set(Array.isArray(other) ? other.map((x) => keyFor(type, x)) : []);
+  const cols = columnsFor(type);
+  const canDelete = LEGACY.has(type);
   const rows = items
     .map((it) => {
-      const checked = side === "source" && state.selectedSource.has(`${type}::${it.id}`) ? "checked" : "";
+      const id = idOf(type, it);
+      const checked = side === "source" && state.selectedSource.has(`${type}::${id}`) ? "checked" : "";
       const checkbox = side === "source"
-        ? `<td class="col-check"><input type="checkbox" data-id="${escapeAttr(it.id)}" ${checked} aria-label="Select item"/></td>`
+        ? `<td class="col-check"><input type="checkbox" data-id="${escapeAttr(id)}" ${checked} aria-label="Select item"/></td>`
         : "";
-      const display = type === "scanning"
-        ? `${escapeHtml(it.value || "")}`
-        : `${escapeHtml(formatItemValue(it))}`;
-      const actionCell = side === "dest"
+      const actionCell = side === "dest" && canDelete
         ? `<td class="col-actions">${rowMenu([{ label: "Delete from destination", icon: "trash", danger: true, attrs: `data-delete-dest="${escapeAttr(it.id)}" data-display="${escapeAttr(typeof it.value === "string" ? it.value : formatItemValue(it))}"` }])}</td>`
         : "";
-      const onBoth = otherKeys.has(itemKey(it));
+      const onBoth = otherKeys.has(keyFor(type, it));
       const cls = [onBoth ? "is-dim" : "", checked ? "selected" : ""].filter(Boolean).join(" ");
       return `
         <tr${cls ? ` class="${cls}"` : ""}${onBoth ? ' title="Exists on both sides"' : ""}>
           ${checkbox}
-          <td><span class="tag tag-muted">${escapeHtml(it.type || "")}</span></td>
-          <td class="mono-cell">${display}</td>
-          <td><span class="hint">${escapeHtml(it.comment || "")}</span></td>
+          ${cols.cells(it).map((c) => `<td>${c}</td>`).join("")}
           ${actionCell}
         </tr>`;
     })
     .join("");
-  const headerExtra = side === "dest" ? `<th class="col-actions"></th>` : "";
+  const headerExtra = side === "dest" && canDelete ? `<th class="col-actions"></th>` : "";
   const checkHeader = side === "source" ? `<th class="col-check"></th>` : "";
   target.innerHTML = `
+    ${note}
     <table class="data-table">
       <thead>
-        <tr>${checkHeader}<th>Kind</th><th>Value</th><th>Comment</th>${headerExtra}</tr>
+        <tr>${checkHeader}${cols.head.map((h) => `<th>${h}</th>`).join("")}${headerExtra}</tr>
       </thead>
       <tbody>${rows}</tbody>
     </table>`;
@@ -215,26 +318,43 @@ function renderBasket() {
   basket.classList.toggle("hidden", state.selectedSource.size === 0);
 }
 
+function selectionsByType() {
+  const byType = {};
+  for (const key of state.selectedSource) {
+    const [type, id] = splitKey(key);
+    (byType[type] = byType[type] || []).push(id);
+  }
+  return byType;
+}
+
 function wireBasket() {
+  document.getElementById("basket-preview").addEventListener("click", async () => {
+    if (!state.selectedSource.size) return;
+    const selections = selectionsByType();
+    try {
+      const res = await api.post("/api/migrate/exclusions", { selections, dryRun: true });
+      showResults(res.results ?? [], true);
+    } catch (err) {
+      toast(err.message || "Preview failed", "err");
+    }
+  });
+
   document.getElementById("basket-copy").addEventListener("click", async () => {
     if (!state.selectedSource.size) return;
-    const byType = {};
-    for (const key of state.selectedSource) {
-      const [type, id] = key.split("::");
-      const apiKey = type === "scanning" ? "scanning" : type;
-      (byType[apiKey] = byType[apiKey] || []).push(id);
-    }
+    const selections = selectionsByType();
     if (!confirm(`Copy ${state.selectedSource.size} item(s) to destination?`)) return;
     try {
-      const res = await api.post("/api/migrate/exclusions", { selections: byType });
+      const res = await api.post("/api/migrate/exclusions", { selections });
       const ok = res.results?.filter((r) => r.ok).length ?? 0;
       const failed = res.results?.filter((r) => !r.ok).length ?? 0;
       toast(`Copied ${ok} / failed ${failed}`, failed ? "err" : "ok");
+      showResults(res.results ?? [], false);
       state.selectedSource.clear();
       renderBasket();
-      const tab = TABS.find((t) => t.id === state.activeTab);
-      if (tab) {
-        await refreshSection("dest", tab.section).catch(() => {});
+      for (const type of Object.keys(selections)) {
+        const tab = TABS.find((t) => t.id === type);
+        if (!tab) continue;
+        if (tab.section) await refreshSection("dest", tab.section).catch(() => {});
         await loadSide("dest", tab);
       }
       renderActive();
@@ -242,6 +362,65 @@ function wireBasket() {
       toast(err.message || "Copy failed", "err");
     }
   });
+}
+
+// One line of text that identifies a source item in the results list.
+function describe(type, id) {
+  const items = state.data[type]?.source;
+  const it = Array.isArray(items) ? items.find((x) => idOf(type, x) === id) : null;
+  if (!it) return id;
+  switch (type) {
+    case "isolation":
+    case "intrusion-prevention":
+      return `${it.direction} ${(it.remoteAddresses || []).join(", ") || "any address"}`;
+    case "exploit-mitigation":
+      return (it.paths || []).join(", ") || it.name || id;
+    case "local-sites":
+      return it.url || id;
+    case "tls-excluded-websites":
+      return it.value || id;
+    case "scanning":
+      return it.value || id;
+    default:
+      return formatItemValue(it) || id;
+  }
+}
+
+function showResults(results, dryRun) {
+  document.getElementById("results-modal")?.remove();
+  const outcome = (r) => {
+    if (!r.ok) return `<span class="tag tag-bad">failed</span>`;
+    if (r.action === "skip-exists") return `<span class="tag tag-muted">already there</span>`;
+    if (r.action === "dry-run-create") return `<span class="tag tag-accent">would create</span>`;
+    return `<span class="tag tag-ok">created</span>`;
+  };
+  const groups = TABS.filter((t) => results.some((r) => r.type === t.id)).map((t) => {
+    const rows = results.filter((r) => r.type === t.id).map((r) => `
+      <li class="result-row">
+        ${outcome(r)}
+        <span class="mono-cell">${esc(describe(t.id, r.sourceId))}</span>
+        ${r.error ? `<span class="ep-error">${esc(r.error)}</span>` : ""}
+      </li>`).join("");
+    return `<h3>${esc(t.label.charAt(0).toUpperCase() + t.label.slice(1))}s</h3><ul class="result-list">${rows}</ul>`;
+  }).join("");
+  const creates = results.filter((r) => r.ok && (r.action === "create" || r.action === "dry-run-create")).length;
+  const modal = document.createElement("div");
+  modal.id = "results-modal";
+  modal.className = "modal-overlay";
+  modal.innerHTML = `
+    <div class="modal-card" role="dialog" aria-label="${dryRun ? "Preview" : "Copy results"}">
+      <header class="modal-header">
+        <h2>${dryRun ? "Preview: nothing was written" : "Copy results"}</h2>
+        <button class="icon-btn modal-close" title="Close" aria-label="Close">${icon("x")}</button>
+      </header>
+      <div class="modal-body">
+        <p class="hint">${dryRun ? `${plural(creates, "item")} would be created on the destination.` : `${plural(creates, "item")} created on the destination. Each write is in data/audit.log.`}</p>
+        ${groups}
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.querySelector(".modal-close").addEventListener("click", () => modal.remove());
+  modal.addEventListener("click", (e) => { if (e.target === modal) modal.remove(); });
 }
 
 function escapeHtml(s) {

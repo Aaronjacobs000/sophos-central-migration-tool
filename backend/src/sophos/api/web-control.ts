@@ -1,7 +1,7 @@
 /**
- * Wrappers for Sophos web-control settings. Currently just the Website
- * Management local-site list, used to discover which website tags exist in a
- * tenant — web-control policies reference those tags by name, and writing a
+ * Wrappers for Sophos web-control settings: the Website Management
+ * local-site list, used to discover which website tags exist in a
+ * tenant. Web-control policies reference those tags by name, and writing a
  * policy that names a tag the tenant doesn't have fails outright.
  */
 
@@ -36,4 +36,15 @@ export async function listLocalSites(
     page++;
   }
   return items;
+}
+
+export async function createLocalSite(
+  client: SophosClient,
+  tenantId: string,
+  body: { url: string; categoryId?: number; tags?: string[]; comment?: string },
+): Promise<SophosLocalSite> {
+  return client.tenantRequest<SophosLocalSite>(tenantId, LOCAL_SITES_PATH, {
+    method: "POST",
+    body,
+  });
 }

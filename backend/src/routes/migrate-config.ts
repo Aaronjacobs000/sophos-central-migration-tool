@@ -8,7 +8,7 @@ import { Router } from "express";
 import { requireConfigured } from "../middleware/require-configured.js";
 import { migratePolicies } from "../services/policy-migrator.js";
 import { mirrorGroups } from "../services/group-mirror.js";
-import { copyExclusions, type ExclusionType } from "../services/exclusion-copier.js";
+import { copyExclusions, EXCLUSION_TYPES, type ExclusionType } from "../services/exclusion-copier.js";
 
 export const migrateConfigRouter = Router();
 
@@ -60,9 +60,9 @@ migrateConfigRouter.post("/migrate/exclusions", async (req, res, next) => {
       res.status(400).json({ error: "bad_request", message: "selections required" });
       return;
     }
-    // Sanitise: only allow the three known types
+    // Sanitise: only allow the known types
     const cleaned: Partial<Record<ExclusionType, string[]>> = {};
-    for (const t of ["scanning", "allowed-items", "blocked-items"] as ExclusionType[]) {
+    for (const t of EXCLUSION_TYPES) {
       if (Array.isArray(sel[t])) cleaned[t] = sel[t];
     }
     const results = await copyExclusions({
