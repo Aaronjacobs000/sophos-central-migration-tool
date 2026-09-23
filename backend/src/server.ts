@@ -18,6 +18,7 @@ import { migrateDevicesRouter } from "./routes/migrate-devices.js";
 import { preloadRouter } from "./routes/preload.js";
 import { logsRouter } from "./routes/logs.js";
 import { searchRouter } from "./routes/search.js";
+import { checksRouter } from "./routes/checks.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -51,6 +52,7 @@ async function main() {
   app.use("/api", preloadRouter);
   app.use("/api", logsRouter);
   app.use("/api", searchRouter);
+  app.use("/api", checksRouter);
 
   // --- Per-side resource APIs (guarded by requireConfigured) ---
   app.use("/api", policiesRouter);

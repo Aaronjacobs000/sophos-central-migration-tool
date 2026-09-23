@@ -39,7 +39,8 @@ exact commit SHA at the time of the copy.
   credential handling (loadTenants, getCachedTenants, getIdHeader). The
   resolver now only accepts tenant-scoped credentials and pulls the
   regional API host straight from `/whoami/v1`.
-- **`sophos-client.ts`** is a fork: removed `globalRequest()` (only used
-  for partner/org calls); `tenantRequest()` resolves the host synchronously.
+- **`sophos-client.ts`**: `globalRequest()` skips the caller's identity
+  header when the request sets its own `X-Tenant-ID` or `X-Distributor-ID`,
+  ported from upstream commit 89a43af. The Licensing API needs it.
 - **`sophos.ts` (types)** is a fork: removed `SophosTenant`,
   `SophosTenantPage`, and `SophosIdType` (unused after the resolver fork).

@@ -5,6 +5,9 @@
  *
  * Local modifications:
  *   - Attribution header added.
+ *   - globalRequest() skips the caller's identity header when the request
+ *     carries its own X-Tenant-ID or X-Distributor-ID, ported from upstream
+ *     89a43af. The Licensing API needs this.
  *
  * HTTP client for Sophos Central APIs. Handles region-aware routing, auth
  * headers, retries, and error mapping. Supports tenant-scoped requests
@@ -90,9 +93,19 @@ export class SophosClient {
       }
     }
 
+    // Some global-host APIs (licensing, accounts, audit, business automation) are
+    // scoped by an explicit X-Tenant-ID / X-Distributor-ID header. Sending the
+    // caller's identity header alongside those can be rejected, so skip it when
+    // the caller provides its own scope header.
+    const hasOwnScopeHeader =
+      options.headers &&
+      Object.keys(options.headers).some((h) =>
+        ["x-tenant-id", "x-distributor-id"].includes(h.toLowerCase())
+      );
+
     const headers: Record<string, string> = {
       Authorization: `Bearer ${token}`,
-      [idHeader.name]: idHeader.value,
+      ...(hasOwnScopeHeader ? {} : { [idHeader.name]: idHeader.value }),
       ...(options.body !== undefined
         ? { "Content-Type": "application/json" }
         : {}),

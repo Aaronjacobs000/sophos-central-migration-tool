@@ -16,6 +16,112 @@ async function boot() {
   document.getElementById("migrate-form").dataset.direction = direction;
   renderSelection(ids);
   wireForm(ids);
+
+  loadWindow(direction);
+  loadLicenses(ids, direction);
+  document.getElementById("window-recheck").addEventListener("click", () => loadWindow(direction));
+  document.getElementById("license-recheck").addEventListener("click", () => loadLicenses(ids, direction));
+}
+
+// ---------- pre-flight: Device Migration setting (read only) ----------
+
+async function loadWindow(direction) {
+  const body = document.getElementById("window-body");
+  body.innerHTML = `<p class="hint"><span class="spin"></span> Reading the setting on both tenants</p>`;
+  try {
+    const res = await api.get(`/api/checks/migration-window?direction=${encodeURIComponent(direction)}`);
+    renderWindow(res);
+  } catch (err) {
+    body.innerHTML = `<div class="banner banner-err">${escapeHtml(err.message || "Check failed")}</div>`;
+  }
+}
+
+function windowTone(status) {
+  return { open: "ok", closing: "warn", closed: "bad", off: "bad", unknown: "warn" }[status] ?? "warn";
+}
+
+function renderWindow(res) {
+  const s = res.sending;
+  const r = res.receiving;
+  const tone = windowTone(s.status);
+  const label = { open: "Open", closing: "Closing soon", closed: "Closed", off: "Off", unknown: "Unknown" }[s.status];
+  const fix = ["off", "closed", "unknown"].includes(s.status)
+    ? `<p class="hint check-fix">In Sophos Fusion on the sending tenant, go to <strong>Overview &gt; Global Settings &gt; Device Migration</strong> and turn on <strong>Allow device migration</strong>. Then check again.</p>`
+    : "";
+  document.getElementById("window-body").innerHTML = `
+    <div class="check-main" data-tone="${tone}">
+      <span class="conn-dot" data-state="${tone === "ok" ? "ok" : tone === "bad" ? "error" : "warn"}"></span>
+      <div>
+        <div class="check-title">Sending tenant${s.tenantName ? `, ${escapeHtml(s.tenantName)}` : ""} <span class="tag tag-${tone === "bad" ? "bad" : tone}">${label}</span></div>
+        <p>${escapeHtml(s.message)}</p>
+        ${s.error ? `<p class="ep-error">${escapeHtml(s.error)}</p>` : ""}
+      </div>
+    </div>
+    ${fix}
+    <dl class="kv-list check-kv">
+      <dt>Receiving tenant</dt><dd>${escapeHtml(r.tenantName || r.side)}: ${escapeHtml(r.enabled === true ? "allowed" : r.enabled === false ? "turned off" : "unknown")}</dd>
+      <dt>Checked</dt><dd>${escapeHtml(new Date(res.checkedAt).toLocaleTimeString())}</dd>
+    </dl>`;
+}
+
+// ---------- destination licence check (read only) ----------
+
+async function loadLicenses(ids, direction) {
+  const body = document.getElementById("license-body");
+  document.getElementById("license-summary").innerHTML = "";
+  body.innerHTML = `<p class="hint"><span class="spin"></span> Reading licences on both tenants</p>`;
+  try {
+    const res = await api.post("/api/checks/licenses", { endpointIds: ids, direction });
+    renderLicenses(res);
+  } catch (err) {
+    body.innerHTML = `<div class="banner banner-err">${escapeHtml(err.message || "Check failed")}</div>`;
+  }
+}
+
+function renderLicenses(res) {
+  const warnCount = res.warnings.length;
+  document.getElementById("license-summary").innerHTML = warnCount
+    ? `<span class="tag tag-warn">${warnCount} to check</span>`
+    : `<span class="tag tag-ok">Looks covered</span>`;
+
+  const sel = res.selected;
+  const selLine = `${sel.computers} computer${sel.computers === 1 ? "" : "s"} and ${sel.servers} server${sel.servers === 1 ? "" : "s"} selected${sel.unknown ? `, ${sel.unknown} unread` : ""}.`;
+
+  const seats = res.seats.length
+    ? `<table class="data-table check-table">
+        <thead><tr><th>Licence</th><th class="num-col">Free</th><th class="num-col">Needed</th><th></th></tr></thead>
+        <tbody>${res.seats.map((st) => `
+          <tr>
+            <td><span class="cell-name">${escapeHtml(st.name)}</span></td>
+            <td class="num-col tnum">${st.free === null ? "no limit" : st.free}</td>
+            <td class="num-col tnum">${st.needed}</td>
+            <td>${st.short ? `<span class="tag tag-warn">short</span>` : `<span class="tag tag-ok">ok</span>`}</td>
+          </tr>`).join("")}
+        </tbody>
+      </table>`
+    : `<p class="hint">No endpoint or server licence on the destination matches the selected devices.</p>`;
+
+  const families = res.families.length
+    ? `<ul class="family-list">${res.families.map((f) => `
+        <li>
+          <span class="family-name">${escapeHtml(f.label)}</span>
+          <span class="tag ${f.missing ? "tag-warn" : f.receiving.length ? "tag-ok" : "tag-muted"}">${f.missing ? "not on destination" : f.receiving.length ? "on destination" : "destination only"}</span>
+          <span class="hint family-names" title="${escapeHtml(`Source: ${f.sending.join(", ") || "none"}. Destination: ${f.receiving.join(", ") || "none"}.`)}">${escapeHtml(f.receiving.join(", ") || f.sending.join(", "))}</span>
+        </li>`).join("")}
+      </ul>`
+    : "";
+
+  const warnings = warnCount
+    ? `<ul class="check-warnings">${res.warnings.map((w) => `<li>${icon("alert")}<span>${escapeHtml(w)}</span></li>`).join("")}</ul>`
+    : "";
+
+  document.getElementById("license-body").innerHTML = `
+    <p class="hint">${escapeHtml(selLine)}</p>
+    ${warnings}
+    <h3 class="check-h3">Seats</h3>
+    ${seats}
+    ${families ? `<h3 class="check-h3">Products</h3>${families}` : ""}
+    <p class="hint check-foot">Product names map loosely to features, so this check warns and never blocks.</p>`;
 }
 
 function loadSelection() {

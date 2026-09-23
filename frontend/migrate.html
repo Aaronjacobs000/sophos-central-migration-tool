@@ -50,11 +50,23 @@
       </div>
 
       <aside class="stack-gap" id="checks-column">
-        <section class="panel-card" id="prereq-card">
-          <div class="card-head"><h2><span data-icon="info"></span>Before you start</h2></div>
-          <p class="hint">Device migration must be allowed on the <strong>sending</strong> tenant. In Sophos Fusion, go to
-            <strong>Overview &gt; Global Settings &gt; Device Migration</strong> and turn on
-            <strong>Allow device migration</strong>. Setting a time limit is recommended.</p>
+        <section class="panel-card check-card" id="window-card">
+          <div class="card-head">
+            <h2><span data-icon="shield"></span>Device Migration setting</h2>
+            <span class="spacer"></span>
+            <button type="button" class="icon-btn" id="window-recheck" title="Check again" aria-label="Check the Device Migration setting again"><span data-icon="refresh"></span></button>
+          </div>
+          <div id="window-body"><p class="hint"><span class="spin"></span> Reading the setting on both tenants</p></div>
+        </section>
+
+        <section class="panel-card check-card" id="license-card">
+          <div class="card-head">
+            <h2><span data-icon="ticket"></span>Destination licences</h2>
+            <span id="license-summary"></span>
+            <span class="spacer"></span>
+            <button type="button" class="icon-btn" id="license-recheck" title="Check again" aria-label="Check licences again"><span data-icon="refresh"></span></button>
+          </div>
+          <div id="license-body"><p class="hint"><span class="spin"></span> Reading licences on both tenants</p></div>
         </section>
       </aside>
     </div>

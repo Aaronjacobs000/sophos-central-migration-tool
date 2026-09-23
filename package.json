@@ -20,7 +20,8 @@
     "build": "tsc",
     "start": "npm run build && node backend/dist/server.js",
     "dev": "tsc --watch & node --watch backend/dist/server.js",
-    "clean": "rimraf backend/dist"
+    "clean": "rimraf backend/dist",
+    "test": "npm run build && node --test test/*.test.mjs"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
