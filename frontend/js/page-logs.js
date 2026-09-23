@@ -99,8 +99,8 @@ function render() {
         <tr class="${levelClass}">
           <td class="log-ts">${escapeHtml(ts)}</td>
           <td><span class="log-level-pill ${levelClass}">${escapeHtml(e.level)}</span></td>
-          <td>${escapeHtml(e.section || "")}</td>
-          <td>${escapeHtml(e.side || "")}</td>
+          <td><span class="hint">${escapeHtml(e.section || "")}</span></td>
+          <td>${e.side ? `<span class="tag ${e.side === "dest" ? "tag-dst" : "tag-src"}">${escapeHtml(e.side)}</span>` : ""}</td>
           <td class="log-message">${escapeHtml(e.message)}</td>
         </tr>`;
     })

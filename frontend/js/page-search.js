@@ -54,14 +54,14 @@ function renderResults(items, q, scope) {
   const rows = items.map((r) => {
     const ep = r.endpoint;
     const stale = isStale(ep);
-    const staleBadge = stale ? `<span class="diff-pill diff-pill-remove" style="margin-left:0.4rem;">stale</span>` : "";
+    const staleBadge = stale ? ` <span class="tag tag-bad">stale</span>` : "";
     const sideBadge = sideLabel(r.side);
-    const lastSeen = ep.lastSeenAt ? new Date(ep.lastSeenAt).toLocaleDateString() : "—";
+    const lastSeen = ep.lastSeenAt ? new Date(ep.lastSeenAt).toLocaleDateString() : "never";
     const os = ep.os ? `${ep.os.name || ep.os.platform || ""} ${ep.os.majorVersion ?? ""}`.trim() : "";
-    const ips = (ep.ipv4Addresses || []).join(", ") || "—";
-    const person = ep.associatedPerson?.name || ep.associatedPerson?.viaLogin || "—";
-    const health = ep.health?.overall || "—";
-    const products = (ep.assignedProducts || []).map((p) => `${p.code} ${p.version}`).join(", ") || "—";
+    const ips = (ep.ipv4Addresses || []).join(", ") || "-";
+    const person = ep.associatedPerson?.name || ep.associatedPerson?.viaLogin || "-";
+    const health = ep.health?.overall || "-";
+    const products = (ep.assignedProducts || []).map((p) => `${p.code} ${p.version}`).join(", ") || "-";
 
     return `
       <tr>
@@ -80,7 +80,7 @@ function renderResults(items, q, scope) {
   }).join("");
 
   results.innerHTML = `
-    <p class="hint" style="margin-bottom:0.75rem;">${items.length} result${items.length === 1 ? "" : "s"} for "${esc(q)}"</p>
+    <p class="hint">${items.length} result${items.length === 1 ? "" : "s"} for "${esc(q)}"</p>
     <table class="data-table">
       <thead>
         <tr>
@@ -109,9 +109,9 @@ function renderResults(items, q, scope) {
 }
 
 function sideLabel(side) {
-  if (side === "source") return `<span class="diff-pill" style="background:rgba(54,145,227,0.14);color:#8fc3f1;border:1px solid rgba(54,145,227,0.35);">source</span>`;
-  if (side === "dest") return `<span class="diff-pill" style="background:rgba(177,102,220,0.14);color:#d6a8f0;border:1px solid rgba(177,102,220,0.35);">dest</span>`;
-  return `<span class="diff-pill" style="background:var(--bg-surface-3);color:var(--text-muted);">other</span>`;
+  if (side === "source") return `<span class="tag tag-src">source</span>`;
+  if (side === "dest") return `<span class="tag tag-dst">destination</span>`;
+  return `<span class="tag tag-muted">other</span>`;
 }
 
 function showDetailModal(ep) {
@@ -119,12 +119,12 @@ function showDetailModal(ep) {
   if (existing) existing.remove();
 
   const products = (ep.assignedProducts || []).map((p) =>
-    `<li><code>${esc(p.code)}</code> v${esc(p.version)} — ${esc(p.status)}</li>`
-  ).join("") || "<li>—</li>";
+    `<li><code>${esc(p.code)}</code> v${esc(p.version)}, ${esc(p.status)}</li>`
+  ).join("") || "<li>none</li>";
 
   const services = (ep.health?.services?.serviceDetails || []).map((s) =>
     `<li>${esc(s.name)}: ${esc(s.status)}</li>`
-  ).join("") || "<li>—</li>";
+  ).join("") || "<li>none</li>";
 
   const modal = document.createElement("div");
   modal.id = "detail-modal";
@@ -144,19 +144,19 @@ function showDetailModal(ep) {
           <dt>Health</dt><dd>${esc(ep.health?.overall || "")}</dd>
           <dt>Threats</dt><dd>${esc(ep.health?.threats?.status || "")}</dd>
           <dt>Services</dt><dd>${esc(ep.health?.services?.status || "")}</dd>
-          <dt>IPv4</dt><dd>${esc((ep.ipv4Addresses || []).join(", ") || "—")}</dd>
-          <dt>IPv6</dt><dd>${esc((ep.ipv6Addresses || []).join(", ") || "—")}</dd>
-          <dt>MAC</dt><dd>${esc((ep.macAddresses || []).join(", ") || "—")}</dd>
+          <dt>IPv4</dt><dd>${esc((ep.ipv4Addresses || []).join(", ") || "none")}</dd>
+          <dt>IPv6</dt><dd>${esc((ep.ipv6Addresses || []).join(", ") || "none")}</dd>
+          <dt>MAC</dt><dd>${esc((ep.macAddresses || []).join(", ") || "none")}</dd>
           <dt>User</dt><dd>${esc(ep.associatedPerson?.name || "")} ${esc(ep.associatedPerson?.viaLogin ? `(${ep.associatedPerson.viaLogin})` : "")}</dd>
           <dt>Tamper protection</dt><dd>${ep.tamperProtectionEnabled ? "enabled" : "disabled"}</dd>
-          <dt>Isolation</dt><dd>${esc(ep.isolation?.status || "—")}</dd>
-          <dt>Lockdown</dt><dd>${esc(ep.lockdown?.status || "—")}</dd>
-          <dt>Group</dt><dd>${esc(ep.groupName || "—")} ${ep.groupId ? `<code>${esc(ep.groupId)}</code>` : ""}</dd>
-          <dt>Last seen</dt><dd>${ep.lastSeenAt ? new Date(ep.lastSeenAt).toLocaleString() : "—"}</dd>
+          <dt>Isolation</dt><dd>${esc(ep.isolation?.status || "none")}</dd>
+          <dt>Lockdown</dt><dd>${esc(ep.lockdown?.status || "none")}</dd>
+          <dt>Group</dt><dd>${esc(ep.groupName || "none")} ${ep.groupId ? `<code>${esc(ep.groupId)}</code>` : ""}</dd>
+          <dt>Last seen</dt><dd>${ep.lastSeenAt ? new Date(ep.lastSeenAt).toLocaleString() : "never"}</dd>
         </dl>
-        <h3 style="margin-top:1rem;">Assigned products</h3>
+        <h3>Assigned products</h3>
         <ul>${products}</ul>
-        <h3 style="margin-top:1rem;">Service details</h3>
+        <h3>Service details</h3>
         <ul>${services}</ul>
       </div>
     </div>

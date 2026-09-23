@@ -967,3 +967,20 @@ input:disabled { cursor: not-allowed; opacity: 0.5; }
 .split-row > .cred-card + .cred-card { margin-top: 0; }
 .cred-card h2 { margin-bottom: 14px; }
 .cred-card .banner { margin-top: 12px; }
+
+/* ================= help, logs, search ================= */
+.help-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.help-grid .panel-card + .panel-card { margin-top: 0; }
+.help-wide { grid-column: 1 / -1; }
+.help-grid ul, .help-grid ol { margin: 8px 0 0; padding-left: 20px; color: var(--ink-2); font-size: 13.5px; }
+.help-grid li { margin-bottom: 6px; }
+.help-grid p { font-size: 13.5px; }
+.help-grid h2 { margin-bottom: 10px; }
+.toolbar-sticky { position: sticky; top: calc(var(--topbar-h) + 10px); z-index: 20; }
+.wide-search, .panel-toolbar input.wide-search { min-width: 300px; }
+.kv-gap { margin-bottom: 14px; }
+.logs-table td { vertical-align: top; }
+.logs-table .log-message { color: var(--ink-1); }
+@media (max-width: 1100px) {
+  .help-grid { grid-template-columns: 1fr; }
+}

@@ -16,18 +16,18 @@
 
   <main class="page-main">
     <h1>Machine search</h1>
-    <p class="page-lead">Search for endpoints by hostname across your connected tenants.</p>
+    <p class="page-lead">Find devices by hostname on the connected tenants. Ctrl K runs the same search from any page.</p>
 
     <section class="panel-card">
       <div class="panel-toolbar">
-        <input type="search" id="search-input" placeholder="Enter hostname or partial hostname…" style="min-width:300px;" />
+        <input type="search" id="search-input" class="wide-search" placeholder="Hostname or part of one" />
         <select id="scope-select">
-          <option value="source-dest">Source + destination only</option>
+          <option value="source-dest">Source and destination only</option>
           <option value="all">All managed tenants (partner mode)</option>
         </select>
         <button id="search-btn" class="btn btn-primary">Search</button>
       </div>
-      <div id="results"><div class="empty-state">Enter a hostname above and click Search.</div></div>
+      <div id="results"><div class="empty-state">Enter a hostname above and press Search.</div></div>
     </section>
   </main>
 

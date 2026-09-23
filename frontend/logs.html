@@ -16,44 +16,44 @@
 
   <main class="page-main">
     <h1>Logs</h1>
-    <p class="page-lead">Live log buffer (last 500 entries) from the local server. Use the
-      filters to narrow down by section, side, or severity.</p>
+    <p class="page-lead">The local server's last 500 log entries. Filter by section, side or level.</p>
+
+    <div class="panel-toolbar toolbar-bar toolbar-sticky">
+      <label class="hint">Section
+        <select id="filter-section">
+          <option value="">All</option>
+          <option value="preload">preload</option>
+          <option value="state">state</option>
+          <option value="credentials">credentials</option>
+        </select>
+      </label>
+      <label class="hint">Side
+        <select id="filter-side">
+          <option value="">Any</option>
+          <option value="source">source</option>
+          <option value="dest">dest</option>
+        </select>
+      </label>
+      <label class="hint">Level
+        <select id="filter-level">
+          <option value="">All</option>
+          <option value="info">info</option>
+          <option value="warn">warn</option>
+          <option value="error">error</option>
+        </select>
+      </label>
+      <input type="search" id="search" placeholder="Filter messages" />
+      <span class="spacer"></span>
+      <label class="checkbox">
+        <input type="checkbox" id="auto-refresh" checked />
+        Auto-refresh
+      </label>
+      <button id="refresh-now" class="btn btn-small"><span data-icon="refresh"></span>Refresh</button>
+      <button id="clear-logs" class="btn btn-small">Clear</button>
+    </div>
 
     <section class="panel-card">
-      <div class="panel-toolbar">
-        <label class="hint">Section
-          <select id="filter-section">
-            <option value="">All</option>
-            <option value="preload">preload</option>
-            <option value="state">state</option>
-            <option value="credentials">credentials</option>
-          </select>
-        </label>
-        <label class="hint">Side
-          <select id="filter-side">
-            <option value="">Any</option>
-            <option value="source">source</option>
-            <option value="dest">dest</option>
-          </select>
-        </label>
-        <label class="hint">Level
-          <select id="filter-level">
-            <option value="">All</option>
-            <option value="info">info</option>
-            <option value="warn">warn</option>
-            <option value="error">error</option>
-          </select>
-        </label>
-        <input type="search" id="search" placeholder="Filter message…" />
-        <span class="spacer"></span>
-        <label class="checkbox">
-          <input type="checkbox" id="auto-refresh" checked />
-          Auto-refresh
-        </label>
-        <button id="refresh-now" class="btn">Refresh</button>
-        <button id="clear-logs" class="btn">Clear</button>
-      </div>
-      <div id="logs-table"><div class="empty-state">Loading…</div></div>
+      <div id="logs-table"><div class="empty-state">Loading</div></div>
     </section>
   </main>
 

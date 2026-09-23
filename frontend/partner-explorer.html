@@ -16,39 +16,31 @@
 
   <main class="page-main">
     <h1>Partner Explorer</h1>
-    <p class="page-lead">Browse all tenants managed by your partner account and search for
-      endpoints across every tenant.</p>
+    <p class="page-lead">Browse every tenant your partner or organization credentials manage, and find devices across all of them.</p>
 
-    <!-- Global endpoint search -->
-    <section class="panel-card" style="margin-bottom:1.25rem;">
+    <section class="panel-card">
+      <div class="card-head"><h2>Device search across all tenants</h2></div>
+      <p class="card-sub">Search by hostname across every managed tenant. Results show which tenant each device is in.</p>
       <div class="panel-toolbar">
-        <h2 style="margin:0;">Endpoint search (all tenants)</h2>
-        <span class="spacer"></span>
-      </div>
-      <p class="hint" style="margin-bottom:0.75rem;">Search by hostname across every managed
-        tenant. Results show which tenant each device belongs to.</p>
-      <div class="panel-toolbar">
-        <input type="search" id="global-search" placeholder="Enter hostname…" style="min-width:300px;" />
+        <input type="search" id="global-search" class="wide-search" placeholder="Hostname" />
         <button id="global-search-btn" class="btn btn-primary">Search</button>
       </div>
       <div id="global-results"></div>
     </section>
 
-    <!-- Tenant list -->
     <section class="panel-card">
       <div class="panel-toolbar">
-        <h2 style="margin:0;">Managed tenants</h2>
+        <h2>Managed tenants</h2>
         <span class="spacer"></span>
-        <input type="search" id="filter-tenants" placeholder="Filter by name…" />
+        <input type="search" id="filter-tenants" placeholder="Filter by name" />
         <span id="tenant-count" class="hint"></span>
       </div>
-      <div id="tenant-list"><div class="empty-state">Loading…</div></div>
+      <div id="tenant-list"><div class="empty-state">Loading</div></div>
     </section>
 
-    <!-- Tenant drill-down panel -->
-    <section class="panel-card hidden" id="tenant-detail" style="margin-top:1.25rem;">
+    <section class="panel-card hidden" id="tenant-detail">
       <div class="panel-toolbar">
-        <h2 id="detail-title" style="margin:0;">Tenant detail</h2>
+        <h2 id="detail-title">Tenant detail</h2>
         <span class="spacer"></span>
         <button id="close-detail" class="btn btn-small">Close</button>
       </div>

@@ -117,10 +117,10 @@ function renderSearchResults(items, q) {
   const rows = items.map((r) => {
     const ep = r.endpoint;
     const stale = isStale(ep);
-    const staleBadge = stale ? `<span class="diff-pill diff-pill-remove" style="margin-left:0.4rem;">stale</span>` : "";
+    const staleBadge = stale ? ` <span class="tag tag-bad">stale</span>` : "";
     const os = ep.os ? `${ep.os.name || ep.os.platform || ""}`.trim() : "";
-    const ips = (ep.ipv4Addresses || []).slice(0, 2).join(", ") || "—";
-    const lastSeen = ep.lastSeenAt ? fmtRelative(ep.lastSeenAt) : "—";
+    const ips = (ep.ipv4Addresses || []).slice(0, 2).join(", ") || "-";
+    const lastSeen = ep.lastSeenAt ? fmtRelative(ep.lastSeenAt) : "never";
     return `
       <tr>
         <td><strong>${esc(ep.hostname || "")}</strong>${staleBadge}</td>
@@ -135,7 +135,7 @@ function renderSearchResults(items, q) {
   }).join("");
 
   results.innerHTML = `
-    <p class="hint" style="margin:0.75rem 0 0.5rem;">${items.length} result${items.length === 1 ? "" : "s"} for "${esc(q)}"</p>
+    <p class="hint">${items.length} result${items.length === 1 ? "" : "s"} for "${esc(q)}"</p>
     <table class="data-table">
       <thead><tr><th>Hostname</th><th>Tenant</th><th>Side</th><th>OS</th><th>Health</th><th>IP</th><th>Seen</th><th>User</th></tr></thead>
       <tbody>${rows}</tbody>
@@ -153,11 +153,11 @@ async function exploreTenant(tenantId, tenantName) {
   const body = document.getElementById("detail-body");
 
   body.innerHTML = `
-    <dl class="kv-list" style="margin-bottom:1rem;">
+    <dl class="kv-list kv-gap">
       <dt>Tenant ID</dt><dd><code>${esc(tenantId)}</code></dd>
     </dl>
     <div class="panel-toolbar">
-      <input type="search" id="tenant-ep-search" placeholder="Search endpoints in ${escAttr(tenantName)}…" style="min-width:250px;" />
+      <input type="search" id="tenant-ep-search" placeholder="Search devices in ${escAttr(tenantName)}" class="wide-search" />
       <button class="btn" id="tenant-ep-search-btn">Search</button>
     </div>
     <div id="tenant-ep-results"><div class="empty-state">Enter a hostname above to search this tenant's endpoints.</div></div>
@@ -178,9 +178,9 @@ async function exploreTenant(tenantId, tenantName) {
       }
       const rows = items.map((r) => {
         const ep = r.endpoint;
-        const os = ep.os ? `${ep.os.name || ep.os.platform || ""}`.trim() : "—";
-        const lastSeen = ep.lastSeenAt ? fmtRelative(ep.lastSeenAt) : "—";
-        const ips = (ep.ipv4Addresses || []).slice(0, 2).join(", ") || "—";
+        const os = ep.os ? `${ep.os.name || ep.os.platform || ""}`.trim() : "-";
+        const lastSeen = ep.lastSeenAt ? fmtRelative(ep.lastSeenAt) : "never";
+        const ips = (ep.ipv4Addresses || []).slice(0, 2).join(", ") || "-";
         return `
           <tr>
             <td><strong>${esc(ep.hostname || "")}</strong></td>
@@ -208,9 +208,9 @@ async function exploreTenant(tenantId, tenantName) {
 }
 
 function sideLabel(side) {
-  if (side === "source") return `<span class="diff-pill" style="background:rgba(54,145,227,0.14);color:#8fc3f1;border:1px solid rgba(54,145,227,0.35);">source</span>`;
-  if (side === "dest") return `<span class="diff-pill" style="background:rgba(177,102,220,0.14);color:#d6a8f0;border:1px solid rgba(177,102,220,0.35);">dest</span>`;
-  return `<span class="diff-pill" style="background:var(--bg-surface-3);color:var(--text-muted);">other</span>`;
+  if (side === "source") return `<span class="tag tag-src">source</span>`;
+  if (side === "dest") return `<span class="tag tag-dst">destination</span>`;
+  return `<span class="tag tag-muted">other</span>`;
 }
 
 function isStale(ep) {
