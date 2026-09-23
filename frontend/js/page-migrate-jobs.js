@@ -20,7 +20,7 @@ async function boot() {
 
 async function load() {
   const container = document.getElementById("jobs-list");
-  container.innerHTML = `<div class="empty-state">Loading…</div>`;
+  container.innerHTML = `<div class="empty-state">Loading</div>`;
   try {
     const endpoint = currentTab === "all"
       ? "/api/migrate/devices/jobs/all"
@@ -37,68 +37,64 @@ function render(jobs) {
   const container = document.getElementById("jobs-list");
   if (jobs.length === 0) {
     container.innerHTML =
-      `<div class="empty-state">No migration jobs found. Start one from the <a href="/endpoints.html">Endpoints</a> page.</div>`;
+      `<div class="empty-state">No migration jobs yet. Start one from the <a href="/endpoints.html">Endpoints</a> page.</div>`;
     return;
   }
 
   const rows = jobs
     .map((j) => {
-      const created = j.createdAt ? new Date(j.createdAt).toLocaleString() : "—";
-      const statusClass = statusToClass(j.status);
+      const created = j.createdAt ? new Date(j.createdAt).toLocaleString() : "unknown";
       const isLocal = j.origin === "local";
 
-      // Origin badge
       const originBadge = isLocal
-        ? `<span class="origin-pill origin-local">This tool</span>`
-        : `<span class="origin-pill origin-api">API</span>`;
+        ? `<span class="tag tag-src">This tool</span>`
+        : `<span class="tag tag-dst" title="Found on the ${escapeHtml(j.apiTenant === "dest" ? "destination" : "source")} tenant">Other</span>`;
 
-      // Name column — link to detail if we have a local ID
       const nameCell = j.localJobId
         ? `<a href="/migrate-job-detail.html?id=${encodeURIComponent(j.localJobId)}">${escapeHtml(j.jobName)}</a>`
-        : escapeHtml(j.jobName);
+        : `<span class="cell-name">${escapeHtml(j.jobName)}</span>`;
 
-      // Endpoints count
-      const epCount = j.endpointCount != null ? j.endpointCount : "—";
+      const epCount = j.endpointCount != null ? j.endpointCount : "-";
 
-      // Migration IDs
       const sourceId = j.sourceMigrationId
-        ? `<code>${escapeHtml(j.sourceMigrationId.slice(0, 8))}…</code>`
-        : "—";
+        ? `<code>${escapeHtml(j.sourceMigrationId.slice(0, 8))}</code>`
+        : "-";
       const destId = j.destMigrationId
-        ? `<code>${escapeHtml(j.destMigrationId.slice(0, 8))}…</code>`
-        : "—";
+        ? `<code>${escapeHtml(j.destMigrationId.slice(0, 8))}</code>`
+        : "-";
 
-      // For API-only jobs, show the single migration ID + mode + tenant
       const apiInfo = !isLocal
-        ? `<code>${escapeHtml((j.apiMigrationId || "").slice(0, 8))}…</code>
-           <span class="text-muted">${escapeHtml(j.apiJobMode || "")} on ${escapeHtml(j.apiTenant || "")}</span>`
+        ? `<code>${escapeHtml((j.apiMigrationId || "").slice(0, 8))}</code>
+           <span class="hint">${escapeHtml(j.apiJobMode || "")} on ${escapeHtml(j.apiTenant === "dest" ? "destination" : j.apiTenant || "")}</span>`
         : "";
 
       return `
         <tr>
           <td>${nameCell}</td>
           <td>${originBadge}</td>
-          <td><span class="diff-pill ${statusClass}">${escapeHtml(j.status)}</span></td>
-          <td>${epCount}</td>
-          <td>${created}</td>
+          <td>${statusTag(j.status)}</td>
+          <td class="job-progress"><div class="job-progress-inner">${progressCell(j)}</div></td>
+          <td class="tnum">${epCount}</td>
+          <td class="cell-nowrap"><span class="hint">${created}</span></td>
           <td>${isLocal ? sourceId : apiInfo || sourceId}</td>
-          <td>${isLocal ? destId : "—"}</td>
+          <td>${isLocal ? destId : "-"}</td>
         </tr>
       `;
     })
     .join("");
 
   container.innerHTML = `
-    <table class="data-table">
+    <table class="data-table jobs-table">
       <thead>
         <tr>
           <th>Name</th>
           <th>Origin</th>
           <th>Status</th>
-          <th>Endpoints</th>
+          <th>Progress</th>
+          <th>Devices</th>
           <th>Created</th>
           <th>Source job</th>
-          <th>Dest job</th>
+          <th>Destination job</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
@@ -107,11 +103,41 @@ function render(jobs) {
   makeSortable(container);
 }
 
-function statusToClass(status) {
+// Share of devices that reached a final state (moved or failed).
+function progressCell(j) {
+  const s = (j.status || "").toLowerCase();
+  const details = new Map();
+  for (const e of [...(j.sourceSnapshot?.endpointDetails ?? []), ...(j.destSnapshot?.endpointDetails ?? [])]) {
+    const prev = details.get(e.id);
+    if (!prev || isFinal(e.status)) details.set(e.id, e);
+  }
+  const total = j.endpointCount || details.size;
+  let done = [...details.values()].filter((e) => isFinal(e.status)).length;
+  let known = details.size > 0 && total > 0;
+  if (!known && ["complete", "completed", "succeeded", "failed", "partially-complete", "cancelled"].includes(s)) {
+    done = total || 1;
+    known = true;
+  }
+  if (!known) {
+    return `<div class="bar"><span class="bar-fill is-live" style="width:35%"></span></div><span class="hint">no device detail</span>`;
+  }
+  const pct = Math.round((done / (total || 1)) * 100);
+  const cls = s === "failed" || s === "cancelled" ? "is-bad" : pct >= 100 ? "is-ok" : "is-live";
+  return `<div class="bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><span class="bar-fill ${cls}" style="width:${Math.max(pct, 4)}%"></span></div><span class="hint tnum">${done} of ${total}</span>`;
+}
+
+function isFinal(status) {
   const s = (status || "").toLowerCase();
-  if (s === "complete" || s === "completed" || s === "succeeded") return "diff-pill-add";
-  if (s === "failed" || s === "cancelled" || s === "error") return "diff-pill-remove";
-  return "diff-pill-change";
+  return ["succeeded", "complete", "completed", "migrated", "failed", "error"].some((t) => s.includes(t));
+}
+
+function statusTag(status) {
+  const s = (status || "").toLowerCase();
+  const label = s === "in-progress" ? "in progress" : s === "partially-complete" ? "partly complete" : s || "unknown";
+  if (s === "complete" || s === "completed" || s === "succeeded") return `<span class="tag tag-ok">${escapeHtml(label)}</span>`;
+  if (s === "failed" || s === "cancelled" || s === "error") return `<span class="tag tag-bad">${escapeHtml(label)}</span>`;
+  if (s === "partially-complete") return `<span class="tag tag-warn">${escapeHtml(label)}</span>`;
+  return `<span class="tag tag-warn"><span class="conn-dot dot-pulse" data-state="loading"></span>${escapeHtml(label)}</span>`;
 }
 
 function escapeHtml(s) {

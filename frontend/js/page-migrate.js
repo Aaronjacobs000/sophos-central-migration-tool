@@ -1,6 +1,7 @@
 import "./nav.js";
 import { api } from "./api.js";
 import { toast } from "./toast.js";
+import { icon } from "./icons.js";
 
 async function boot() {
   const ids = loadSelection();
@@ -9,7 +10,7 @@ async function boot() {
   const toLabel = direction === "source-to-dest" ? "destination" : "source";
 
   document.getElementById("direction-display").innerHTML =
-    `Moving <strong>${ids.length}</strong> endpoint${ids.length === 1 ? "" : "s"} from <strong>${fromLabel}</strong> to <strong>${toLabel}</strong>.`;
+    `<span class="tag ${fromLabel === "source" ? "tag-src" : "tag-dst"}">${fromLabel}</span>${icon("arrowRight")}<span class="tag ${toLabel === "source" ? "tag-src" : "tag-dst"}">${toLabel}</span>`;
 
   // Store direction on the form for use in submission
   document.getElementById("migrate-form").dataset.direction = direction;
@@ -31,7 +32,7 @@ async function renderSelection(ids) {
     list.innerHTML = `<div class="empty-state">No endpoints selected. Pick devices on the <a href="/endpoints.html">Endpoints</a> page first.</div>`;
     return;
   }
-  list.innerHTML = `<p><strong>${ids.length}</strong> endpoint${ids.length === 1 ? "" : "s"} selected for migration.</p>`;
+  list.innerHTML = `<p class="hint"><strong>${ids.length}</strong> device${ids.length === 1 ? "" : "s"} selected.</p>`;
 
   // Best-effort enrich with hostnames
   try {
@@ -45,10 +46,10 @@ async function renderSelection(ids) {
       }
     }
     const rows = details
-      .map((d) => `<li><code>${escapeHtml(d.id)}</code> · ${escapeHtml(d.hostname)}</li>`)
+      .map((d) => `<li><span class="sel-host">${escapeHtml(d.hostname)}</span><code class="sel-id">${escapeHtml(d.id)}</code></li>`)
       .join("");
-    const more = ids.length > 30 ? `<p class="hint">… and ${ids.length - 30} more.</p>` : "";
-    list.innerHTML += `<ul style="margin-top:0.75rem; font-size: 0.85rem;">${rows}</ul>${more}`;
+    const more = ids.length > 30 ? `<p class="hint">And ${ids.length - 30} more.</p>` : "";
+    list.innerHTML += `<ul class="sel-list">${rows}</ul>${more}`;
   } catch {
     // ignore enrichment failures
   }
@@ -75,7 +76,7 @@ function wireForm(ids) {
       toast("No endpoints selected.", "info");
       return;
     }
-    showResult("info", "Running dry-run preflight…");
+    showResult("info", `<span class="spin"></span> Running the dry-run preflight`);
     try {
       const res = await api.post("/api/migrate/devices?dryRun=true", {
         jobName,
@@ -83,22 +84,13 @@ function wireForm(ids) {
         direction: dir,
       });
       if (res.dryRun && res.plan) {
-        showResult(
-          "ok",
-          `Dry run OK. Would create receiver job on ${escapeHtml(res.plan.destApiHost)} and sender job on ${escapeHtml(res.plan.sourceApiHost)} for ${ids.length} endpoint(s).`,
-        );
+        showPlan(res.plan, dir);
       } else {
         showResult("ok", "Dry run complete.");
       }
     } catch (err) {
       if (err.body?.preflightFailures) {
-        showResult(
-          "err",
-          `Preflight failed for ${err.body.preflightFailures.length} endpoint(s):<br/>` +
-            err.body.preflightFailures
-              .map((f) => `<code>${escapeHtml(f.hostname || f.endpointId)}</code> — ${escapeHtml(f.reason)}`)
-              .join("<br/>"),
-        );
+        showFailures(err.body.preflightFailures);
       } else {
         showResult("err", migrationErrorHint(err.message || "Dry run failed"));
       }
@@ -113,7 +105,7 @@ function wireForm(ids) {
     }
     if (!confirm(`Create migration jobs for ${ids.length} endpoint(s)?\n\nThis is a real production action.`)) return;
 
-    showResult("info", "Creating migration jobs…");
+    showResult("info", `<span class="spin"></span> Creating migration jobs`);
     try {
       const dir = form.dataset.direction || "source-to-dest";
       const res = await api.post("/api/migrate/devices", { jobName, endpointIds: ids, direction: dir });
@@ -123,13 +115,7 @@ function wireForm(ids) {
       }
     } catch (err) {
       if (err.body?.preflightFailures) {
-        showResult(
-          "err",
-          `Preflight failed:<br/>` +
-            err.body.preflightFailures
-              .map((f) => `<code>${escapeHtml(f.hostname || f.endpointId)}</code> — ${escapeHtml(f.reason)}`)
-              .join("<br/>"),
-        );
+        showFailures(err.body.preflightFailures);
       } else {
         showResult("err", migrationErrorHint(err.message || "Migration start failed"));
       }
@@ -140,6 +126,36 @@ function wireForm(ids) {
 function showResult(variant, html) {
   document.getElementById("result-area").innerHTML =
     `<div class="banner banner-${variant}">${html}</div>`;
+}
+
+// Dry-run result as the list of steps the real run would take.
+function showPlan(plan, dir) {
+  const count = plan.receiverBody?.endpoints?.length ?? 0;
+  const toLabel = dir === "dest-to-source" ? "source" : "destination";
+  const fromLabel = dir === "dest-to-source" ? "destination" : "source";
+  const steps = [
+    { title: "Preflight passed", body: `${count} device${count === 1 ? "" : "s"} checked in within the last 14 days.` },
+    { title: `Receiver job on the ${toLabel} tenant`, body: `<code>POST /endpoint/v1/migrations</code> on <code>${escapeHtml(plan.destApiHost)}</code> with the sending tenant and ${count} device ID${count === 1 ? "" : "s"}.` },
+    { title: `Sender trigger on the ${fromLabel} tenant`, body: `<code>${escapeHtml(plan.senderTrigger?.method ?? "PUT")}</code> on <code>${escapeHtml(plan.sourceApiHost)}</code> with the handshake token from the receiver job.` },
+    { title: "Live status", body: "The job page polls both tenants every 10 seconds until every device has moved or failed." },
+  ];
+  document.getElementById("result-area").innerHTML = `
+    <div class="plan-box">
+      <div class="plan-head">${icon("checkCircle")}<strong>Dry run passed.</strong><span class="hint">Nothing was created. The real run would do this:</span></div>
+      <ol class="plan-list">${steps.map((st, i) => `
+        <li class="plan-step"><span class="plan-n">${i + 1}</span><div><strong>${st.title}</strong><p>${st.body}</p></div></li>`).join("")}
+      </ol>
+    </div>`;
+}
+
+function showFailures(failures) {
+  document.getElementById("result-area").innerHTML = `
+    <div class="plan-box is-bad">
+      <div class="plan-head">${icon("xCircle")}<strong>Preflight failed for ${failures.length} device${failures.length === 1 ? "" : "s"}.</strong><span class="hint">Nothing was created.</span></div>
+      <ul class="plan-list">${failures.map((f) => `
+        <li class="plan-step"><span class="plan-n">${icon("x")}</span><div><strong>${escapeHtml(f.hostname || f.endpointId)}</strong><p>${escapeHtml(f.reason)}</p></div></li>`).join("")}
+      </ul>
+    </div>`;
 }
 
 function migrationErrorHint(msg) {

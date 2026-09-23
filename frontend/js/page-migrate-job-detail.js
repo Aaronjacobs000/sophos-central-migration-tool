@@ -1,6 +1,7 @@
 import "./nav.js";
 import { api } from "./api.js";
 import { toast } from "./toast.js";
+import { icon } from "./icons.js";
 
 let currentJob = null;
 let eventSource = null;
@@ -46,7 +47,6 @@ function connectStream(id) {
 async function manualRefresh(id) {
   const btn = document.getElementById("refresh-btn");
   btn.disabled = true;
-  btn.textContent = "Refreshing…";
   try {
     const job = await api.get(`/api/migrate/devices/jobs/${encodeURIComponent(id)}`);
     currentJob = job;
@@ -56,33 +56,34 @@ async function manualRefresh(id) {
     toast(err.message || "Refresh failed", "err");
   } finally {
     btn.disabled = false;
-    btn.textContent = "Refresh now";
   }
 }
 
 function render(job) {
-  document.getElementById("job-title").textContent = `Migration: ${job.jobName}`;
+  document.getElementById("job-title").textContent = job.jobName;
 
   const created = new Date(job.createdAt);
   const elapsed = formatElapsed(created);
   document.getElementById("job-lead").textContent =
-    `Local job ID ${job.localJobId} · created ${created.toLocaleString()} · elapsed ${elapsed}`;
+    `Created ${created.toLocaleString()}, ${elapsed} ago. Local job ID ${job.localJobId}.`;
 
   // Warnings
   renderWarnings(job);
 
+  document.getElementById("job-status").innerHTML = statusTag(job.status);
+  renderProgress(job);
+
   // Core metadata
   const meta = document.getElementById("job-meta");
+  const toSource = job.direction === "dest-to-source";
   meta.innerHTML = `
-    <dl class="kv-list">
-      <dt>Aggregate status</dt>
-      <dd><span class="diff-pill ${statusClass(job.status)}">${esc(job.status)}</span></dd>
-      <dt>Direction</dt><dd>${esc(job.direction || "—")}</dd>
-      <dt>Endpoints</dt><dd>${job.endpointIds.length}</dd>
+    <dl class="kv-list meta-inline">
+      <dt>Direction</dt><dd><span class="tag ${toSource ? "tag-dst" : "tag-src"}">${toSource ? "destination" : "source"}</span> ${icon("arrowRight")} <span class="tag ${toSource ? "tag-src" : "tag-dst"}">${toSource ? "source" : "destination"}</span></dd>
+      <dt>Devices</dt><dd class="tnum">${job.endpointIds.length}</dd>
       <dt>Last polled</dt>
-      <dd>${job.lastPolledAt ? new Date(job.lastPolledAt).toLocaleString() : "—"}</dd>
+      <dd>${job.lastPolledAt ? new Date(job.lastPolledAt).toLocaleString() : "not yet"}</dd>
     </dl>
-    ${job.lastError ? `<div class="banner banner-warn" style="margin-top:0.75rem;">${esc(job.lastError)}</div>` : ""}
+    ${job.lastError ? `<div class="banner banner-warn">${esc(job.lastError)}</div>` : ""}
   `;
 
   // Source / dest API panels
@@ -100,9 +101,9 @@ function renderWarnings(job) {
     const ageMs = Date.now() - new Date(job.createdAt).getTime();
     if (ageMs > 10 * 60 * 1000) {
       warnings.push(
-        `This migration has been in-progress for ${formatElapsed(new Date(job.createdAt))}. ` +
-        `If the endpoint is online and checking in, this may indicate a problem. ` +
-        `Check the source and dest API status panels below for error details.`
+        `This migration has been in progress for ${formatElapsed(new Date(job.createdAt))}. ` +
+        `If the devices are online and checking in, something may be wrong. ` +
+        `Check the upstream jobs below for error details.`
       );
     } else if (ageMs > 5 * 60 * 1000) {
       warnings.push(
@@ -116,7 +117,7 @@ function renderWarnings(job) {
   const srcErr = job.sourceSnapshot?.errorMessage || job.sourceSnapshot?.errorCode;
   const dstErr = job.destSnapshot?.errorMessage || job.destSnapshot?.errorCode;
   if (srcErr) warnings.push(`Source API error: ${srcErr}`);
-  if (dstErr) warnings.push(`Dest API error: ${dstErr}`);
+  if (dstErr) warnings.push(`Destination API error: ${dstErr}`);
 
   // Check for per-endpoint errors
   const srcDetails = job.sourceSnapshot?.endpointDetails ?? [];
@@ -133,19 +134,19 @@ function renderWarnings(job) {
     return;
   }
   el.innerHTML = warnings
-    .map((w) => `<div class="banner banner-warn" style="margin-bottom:0.75rem;">${esc(w)}</div>`)
+    .map((w) => `<div class="banner banner-warn">${esc(w)}</div>`)
     .join("");
 }
 
 function renderApiStatus(job) {
   const container = document.getElementById("api-status");
   container.innerHTML = `
-    <div class="panel-card" style="margin:0;">
-      <h4 style="margin:0 0 0.5rem;">Source (sender)</h4>
+    <div>
+      <h3 class="side-title">Source</h3>
       ${renderSnapshot(job.sourceSnapshot, "source", job.sourceMigrationId)}
     </div>
-    <div class="panel-card" style="margin:0;">
-      <h4 style="margin:0 0 0.5rem;">Dest (receiver)</h4>
+    <div>
+      <h3 class="side-title is-dest">Destination</h3>
       ${renderSnapshot(job.destSnapshot, "dest", job.destMigrationId)}
     </div>
   `;
@@ -153,7 +154,7 @@ function renderApiStatus(job) {
 
 function renderSnapshot(snap, side, migrationId) {
   if (!snap) {
-    return `<div class="banner banner-warn">No data from ${side} API. The job may have been deleted upstream or the API returned an error.</div>`;
+    return `<div class="banner banner-warn">No data from the ${side === "dest" ? "destination" : "source"} API. The job may have been deleted upstream or the API returned an error.</div>`;
   }
 
   const counts = snap.endpointCounts || {};
@@ -162,7 +163,7 @@ function renderSnapshot(snap, side, migrationId) {
     : "";
 
   const errorHtml = (snap.errorCode || snap.errorMessage)
-    ? `<div class="banner banner-err" style="margin-top:0.5rem;">
+    ? `<div class="banner banner-err">
         ${snap.errorCode ? `<strong>${esc(snap.errorCode)}</strong>: ` : ""}${esc(snap.errorMessage || "Unknown error")}
        </div>`
     : "";
@@ -172,10 +173,10 @@ function renderSnapshot(snap, side, migrationId) {
     : "";
 
   return `
-    <dl class="kv-list" style="font-size:0.8rem;">
+    <dl class="kv-list">
       <dt>Migration ID</dt><dd><code>${esc(migrationId)}</code></dd>
-      <dt>API status</dt><dd><span class="diff-pill ${statusClass(snap.status)}">${esc(snap.status || "—")}</span></dd>
-      <dt>Mode</dt><dd>${esc(snap.mode || snap.type || "—")}</dd>
+      <dt>API status</dt><dd>${snap.status ? `<span class="tag ${statusClass(snap.status)}">${esc(snap.status)}</span>` : `<span class="hint">not reported</span>`}</dd>
+      <dt>Mode</dt><dd>${esc(snap.mode || snap.type || "not reported")}</dd>
       ${countsHtml}
       ${finished}
     </dl>
@@ -198,24 +199,25 @@ function renderEndpoints(job) {
   for (const e of dstDetails) {
     if (merged.has(e.id)) merged.get(e.id).dest = e;
   }
-  grid.innerHTML = Array.from(merged.values())
+  const rows = Array.from(merged.values())
     .map((m) => {
-      const srcStatus = m.source?.status || "—";
-      const dstStatus = m.dest?.status || "—";
       const srcError = m.source?.errorMessage || m.source?.errorCode || "";
       const dstError = m.dest?.errorMessage || m.dest?.errorCode || "";
-      const hasError = srcError || dstError;
-
+      const errors = [srcError && `Source: ${srcError}`, dstError && `Destination: ${dstError}`].filter(Boolean);
       return `
-      <div class="job-status-cell ${hasError ? "job-status-error" : ""}">
-        <div class="hostname">${esc(m.hostname || m.id)}</div>
-        <div class="state ${epStatusClass(srcStatus)}">source: ${esc(srcStatus)}</div>
-        ${srcError ? `<div class="ep-error">${esc(srcError)}</div>` : ""}
-        <div class="state ${epStatusClass(dstStatus)}">dest: ${esc(dstStatus)}</div>
-        ${dstError ? `<div class="ep-error">${esc(dstError)}</div>` : ""}
-      </div>`;
+      <tr${errors.length ? ' class="has-error"' : ""}>
+        <td><span class="cell-name">${esc(m.hostname || m.id)}</span></td>
+        <td>${epState(m.source?.status)}</td>
+        <td>${epState(m.dest?.status)}</td>
+        <td>${errors.length ? `<span class="ep-error">${esc(errors.join(" · "))}</span>` : `<span class="hint">none</span>`}</td>
+      </tr>`;
     })
     .join("");
+  grid.innerHTML = `
+    <table class="data-table">
+      <thead><tr><th>Device</th><th><span class="side-title">Source</span></th><th><span class="side-title is-dest">Destination</span></th><th>Errors</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
 }
 
 async function cancelJob(id) {
@@ -242,9 +244,51 @@ function formatElapsed(since) {
 
 function statusClass(status) {
   const s = (status || "").toLowerCase();
-  if (s === "complete" || s === "completed" || s === "succeeded") return "diff-pill-add";
-  if (s === "failed" || s === "cancelled" || s === "error") return "diff-pill-remove";
-  return "diff-pill-change";
+  if (s === "complete" || s === "completed" || s === "succeeded") return "tag-ok";
+  if (s === "failed" || s === "cancelled" || s === "error") return "tag-bad";
+  return "tag-warn";
+}
+
+function statusTag(status) {
+  const s = (status || "").toLowerCase();
+  const label = s === "in-progress" ? "in progress" : s === "partially-complete" ? "partly complete" : s || "unknown";
+  const live = s === "in-progress" ? `<span class="conn-dot" data-state="loading"></span>` : "";
+  return `<span class="tag ${statusClass(status)}">${live}${esc(label)}</span>`;
+}
+
+// Device-level state with a dot that pulses while the device is still pending.
+function epState(status) {
+  const s = (status || "").toLowerCase();
+  if (!s) return `<span class="ep-state"><span class="conn-dot" data-state="unconfigured"></span><span class="hint">no data</span></span>`;
+  const cls = epStatusClass(s);
+  const state = cls === "ep-ok" ? "ok" : cls === "ep-fail" ? "error" : "loading";
+  return `<span class="ep-state"><span class="conn-dot" data-state="${state}"></span>${esc(s)}</span>`;
+}
+
+function renderProgress(job) {
+  const el = document.getElementById("job-progress");
+  const byId = new Map();
+  for (const e of [...(job.sourceSnapshot?.endpointDetails ?? []), ...(job.destSnapshot?.endpointDetails ?? [])]) {
+    const prev = byId.get(e.id);
+    if (!prev || epStatusClass(e.status) !== "") byId.set(e.id, e);
+  }
+  const total = job.endpointIds.length;
+  let moved = 0;
+  let failed = 0;
+  for (const id of job.endpointIds) {
+    const cls = epStatusClass(byId.get(id)?.status);
+    if (cls === "ep-ok") moved++;
+    else if (cls === "ep-fail") failed++;
+  }
+  const done = moved + failed;
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  const s = (job.status || "").toLowerCase();
+  const cls = s === "failed" || s === "cancelled" ? "is-bad" : pct >= 100 ? "is-ok" : "is-live";
+  el.innerHTML = `
+    <div class="job-bar">
+      <div class="bar bar-lg" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><span class="bar-fill ${cls}" style="width:${Math.max(pct, 3)}%"></span></div>
+      <span class="tnum job-bar-text"><strong>${moved}</strong> moved${failed ? `, <strong>${failed}</strong> failed` : ""}, ${total - done} pending of ${total}</span>
+    </div>`;
 }
 
 function epStatusClass(status) {

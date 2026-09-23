@@ -16,38 +16,48 @@
 
   <main class="page-main">
     <h1>Start a device migration</h1>
-    <p class="page-lead">Review your selection, give the migration a name, and confirm
-      you understand the 14-day window before launching.</p>
+    <p class="page-lead">Review the selection, name the job and confirm the 14-day window, then preview
+      the plan or create the jobs.</p>
 
-    <div class="banner banner-info" style="margin-bottom:1rem;">
-      <strong>Prerequisite:</strong> Device migration must be enabled on the <strong>sending</strong> tenant before starting.
-      In Sophos Fusion, go to <strong>Overview &gt; Global Settings &gt; Device Migration</strong> and turn on
-      <strong>Allow device migration</strong>. We recommend setting a time limit.
+    <div class="migrate-grid">
+      <div class="stack-gap">
+        <section class="panel-card">
+          <div class="card-head">
+            <h2>Selected devices</h2>
+            <span class="spacer"></span>
+            <span id="direction-display" class="direction-display"></span>
+          </div>
+          <div id="selection-list"><div class="empty-state">Loading</div></div>
+        </section>
+
+        <section class="panel-card">
+          <h2>Migration details</h2>
+          <form id="migrate-form" class="cred-form plain-form">
+            <label>Migration job name
+              <input type="text" name="jobName" required placeholder="For example: Finance laptops, wave 1" />
+            </label>
+            <label class="checkbox">
+              <input type="checkbox" id="ack-window" />
+              I understand devices must be online and check in within 14 days for the migration to succeed.
+            </label>
+            <div class="form-actions">
+              <button id="dry-run-btn" type="button" class="btn">Preview (dry run)</button>
+              <button id="start-btn" type="button" class="btn btn-primary" disabled>Create migration jobs</button>
+            </div>
+          </form>
+          <div id="result-area"></div>
+        </section>
+      </div>
+
+      <aside class="stack-gap" id="checks-column">
+        <section class="panel-card" id="prereq-card">
+          <div class="card-head"><h2><span data-icon="info"></span>Before you start</h2></div>
+          <p class="hint">Device migration must be allowed on the <strong>sending</strong> tenant. In Sophos Fusion, go to
+            <strong>Overview &gt; Global Settings &gt; Device Migration</strong> and turn on
+            <strong>Allow device migration</strong>. Setting a time limit is recommended.</p>
+        </section>
+      </aside>
     </div>
-
-    <section class="panel-card">
-      <h2>Selected endpoints</h2>
-      <p id="direction-display" class="hint"></p>
-      <div id="selection-list"><div class="empty-state">Loading…</div></div>
-    </section>
-
-    <section class="panel-card" style="margin-top:1.25rem;">
-      <h2>Migration details</h2>
-      <form id="migrate-form" class="cred-form">
-        <label>Migration job name
-          <input type="text" name="jobName" required placeholder="e.g. Acme tenant migration 2026-04" />
-        </label>
-        <label class="checkbox">
-          <input type="checkbox" id="ack-window" />
-          I understand devices must be online and check in within 14 days for the migration to succeed.
-        </label>
-        <div class="form-actions">
-          <button id="dry-run-btn" type="button" class="btn">Preview (dry run)</button>
-          <button id="start-btn" type="button" class="btn btn-primary" disabled>Create migration jobs</button>
-        </div>
-      </form>
-      <div id="result-area"></div>
-    </section>
   </main>
 
   <footer id="page-footer" class="page-footer"></footer>
