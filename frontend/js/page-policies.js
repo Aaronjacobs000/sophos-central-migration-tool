@@ -517,6 +517,7 @@ function wireRows() {
 function renderBasket() {
   const basket = document.getElementById("selection-basket");
   document.getElementById("basket-count").textContent = String(state.selectedSource.size);
+  document.getElementById("basket-noun").textContent = state.selectedSource.size === 1 ? "source policy selected" : "source policies selected";
   basket.classList.toggle("hidden", state.selectedSource.size === 0);
 }
 

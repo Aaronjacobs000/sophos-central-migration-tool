@@ -3,6 +3,7 @@ import { api } from "./api.js";
 import { toast } from "./toast.js";
 import { getCachedSection, refreshSection } from "./preload-client.js";
 import { makeSortable } from "./sortable.js";
+import { rowMenu, wireRowMenus } from "./ui.js";
 
 const state = {
   activeTab: "endpoint", // "endpoint" | "user"
@@ -52,9 +53,9 @@ async function loadUserGroups(side) {
 // --- Tabs ---
 
 function wireTabs() {
-  document.querySelectorAll(".tab").forEach((tab) => {
+  document.querySelectorAll(".seg-btn[data-tab]").forEach((tab) => {
     tab.addEventListener("click", () => {
-      document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+      document.querySelectorAll(".seg-btn[data-tab]").forEach((t) => t.classList.remove("active"));
       tab.classList.add("active");
       state.activeTab = tab.dataset.tab;
       renderActive();
@@ -68,6 +69,10 @@ function renderActive() {
   renderTable("source");
   renderTable("dest");
   renderBasket();
+  for (const tab of ["endpoint", "user"]) {
+    const el = document.querySelector(`[data-count="${tab}"]`);
+    if (el) el.textContent = String((state[tab].source || []).length);
+  }
 }
 
 function renderTable(side) {
@@ -78,9 +83,9 @@ function renderTable(side) {
   const sorted = filtered.sort((a, b) => a.name.localeCompare(b.name));
   const target = document.getElementById(`table-${side}`);
 
-  const destNames = side === "source"
-    ? new Set((state[tab].dest || []).map((g) => g.name.toLowerCase()))
-    : null;
+  const otherNames = new Set(
+    (state[tab][side === "source" ? "dest" : "source"] || []).map((g) => g.name.toLowerCase()),
+  );
 
   if (sorted.length === 0) {
     const type = tab === "endpoint" ? "endpoint" : "user";
@@ -92,36 +97,40 @@ function renderTable(side) {
     const key = `${tab}::${g.id}`;
     const checked = side === "source" && state.selectedSource.has(key) ? "checked" : "";
     const checkbox = side === "source"
-      ? `<td class="col-check"><input type="checkbox" data-key="${escAttr(key)}" ${checked}/></td>`
-      : `<td class="col-check"></td>`;
-    const onlyOnSource = side === "source" && destNames && !destNames.has(g.name.toLowerCase());
-    const badge = onlyOnSource ? `<span class="diff-pill diff-pill-add">not on dest</span>` : "";
-    const extra = tab === "user"
-      ? `<td><span class="hint">${g.source || ""}</span></td><td>${g.usersCount ?? "—"}</td>`
-      : `<td><code>${esc(g.type || g.endpointType || "")}</code></td>`;
-    const deleteBtn = side === "dest"
-      ? `<td class="col-actions"><button class="btn btn-small btn-danger" data-delete="${escAttr(g.id)}" data-name="${escAttr(g.name)}">Delete</button></td>`
+      ? `<td class="col-check"><input type="checkbox" data-key="${escAttr(key)}" ${checked} aria-label="Select ${escAttr(g.name)}"/></td>`
       : "";
-    return `<tr>${checkbox}<td>${esc(g.name)} ${badge}</td>${extra}${deleteBtn}</tr>`;
+    const onBoth = otherNames.has(g.name.toLowerCase());
+    const badge = side === "source" && !onBoth ? `<span class="tag tag-src">not on destination</span>` : "";
+    const extra = tab === "user"
+      ? `<td><span class="hint">${esc(g.source || "")}</span></td><td class="tnum">${g.usersCount ?? "-"}</td>`
+      : `<td><span class="tag tag-muted">${esc(g.type || g.endpointType || "")}</span></td>`;
+    const deleteBtn = side === "dest"
+      ? `<td class="col-actions">${rowMenu([{ label: "Delete from destination", icon: "trash", danger: true, attrs: `data-delete="${escAttr(g.id)}" data-name="${escAttr(g.name)}"` }])}</td>`
+      : "";
+    const cls = [onBoth ? "is-dim" : "", checked ? "selected" : ""].filter(Boolean).join(" ");
+    return `<tr${cls ? ` class="${cls}"` : ""}${onBoth ? ' title="Exists on both sides"' : ""}>${checkbox}<td><span class="cell-name">${esc(g.name)}</span> ${badge}</td>${extra}${deleteBtn}</tr>`;
   }).join("");
 
   const headerExtra = tab === "user"
     ? `<th>Source</th><th>Users</th>`
     : `<th>Type</th>`;
-  const deleteHeader = side === "dest" ? "<th></th>" : "";
+  const deleteHeader = side === "dest" ? `<th class="col-actions"></th>` : "";
+  const checkHeader = side === "source" ? `<th class="col-check"></th>` : "";
 
   target.innerHTML = `
     <table class="data-table">
-      <thead><tr><th class="col-check"></th><th>Name</th>${headerExtra}${deleteHeader}</tr></thead>
+      <thead><tr>${checkHeader}<th>Name</th>${headerExtra}${deleteHeader}</tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
   makeSortable(target);
+  wireRowMenus(target);
 
   if (side === "source") {
     target.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
       cb.addEventListener("change", (e) => {
         if (e.target.checked) state.selectedSource.add(e.target.dataset.key);
         else state.selectedSource.delete(e.target.dataset.key);
+        e.target.closest("tr")?.classList.toggle("selected", e.target.checked);
         renderBasket();
       });
     });
@@ -129,8 +138,8 @@ function renderTable(side) {
   if (side === "dest") {
     target.querySelectorAll("[data-delete]").forEach((btn) => {
       btn.addEventListener("click", async (e) => {
-        const id = e.target.dataset.delete;
-        const name = e.target.dataset.name;
+        const id = e.currentTarget.dataset.delete;
+        const name = e.currentTarget.dataset.name;
         if (!confirm(`Delete "${name}" from destination?\n\nThis action is irreversible.`)) return;
         if (!confirm(`Are you absolutely sure? "${name}" will be permanently removed.`)) return;
         const path = tab === "user" ? "user-groups" : "groups";
@@ -169,6 +178,7 @@ function renderBasket() {
   const count = state.selectedSource.size;
   const basket = document.getElementById("selection-basket");
   document.getElementById("basket-count").textContent = String(count);
+  document.getElementById("basket-noun").textContent = count === 1 ? "source group selected" : "source groups selected";
   basket.classList.toggle("hidden", count === 0);
 }
 

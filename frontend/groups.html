@@ -16,38 +16,39 @@
 
   <main class="page-main">
     <h1>Groups</h1>
-    <p class="page-lead">Mirror endpoint groups and user groups from source to destination.
-      Only the group name and metadata are copied — membership is not transferred.</p>
+    <p class="page-lead">Mirror endpoint groups and user groups from the source to the destination.
+      Only the name and description are copied, not the members. Rows that already exist on both sides are dimmed.</p>
 
-    <div class="tabs">
-      <button class="tab active" data-tab="endpoint">Endpoint groups</button>
-      <button class="tab" data-tab="user">User groups</button>
+    <div class="seg" role="tablist" aria-label="Group type">
+      <button class="seg-btn active" role="tab" data-tab="endpoint">Endpoint groups <span class="seg-count" data-count="endpoint"></span></button>
+      <button class="seg-btn" role="tab" data-tab="user">User groups <span class="seg-count" data-count="user"></span></button>
     </div>
 
     <div class="split-row">
       <section class="panel-card">
         <div class="panel-toolbar">
-          <h2>Source</h2>
+          <h2 class="side-title">Source</h2>
           <span class="spacer"></span>
-          <input type="search" id="search-source" placeholder="Filter…" />
+          <input type="search" id="search-source" placeholder="Filter" />
           <button id="select-all-source" class="btn btn-small">Select all</button>
           <button id="clear-source" class="btn btn-small">Clear</button>
         </div>
-        <div id="table-source"><div class="empty-state">Loading…</div></div>
+        <div id="table-source"><div class="empty-state">Loading</div></div>
       </section>
       <section class="panel-card">
         <div class="panel-toolbar">
-          <h2>Destination</h2>
+          <h2 class="side-title is-dest">Destination</h2>
           <span class="spacer"></span>
-          <input type="search" id="search-dest" placeholder="Filter…" />
+          <input type="search" id="search-dest" placeholder="Filter" />
         </div>
-        <div id="table-dest"><div class="empty-state">Loading…</div></div>
+        <div id="table-dest"><div class="empty-state">Loading</div></div>
       </section>
     </div>
   </main>
 
   <div id="selection-basket" class="selection-basket hidden">
-    <span><span id="basket-count">0</span> source groups selected</span>
+    <span class="basket-text"><strong id="basket-count">0</strong> <span id="basket-noun">source groups selected</span></span>
+    <span class="basket-sep"></span>
     <button id="basket-mirror" class="btn btn-primary">Mirror to destination</button>
   </div>
 

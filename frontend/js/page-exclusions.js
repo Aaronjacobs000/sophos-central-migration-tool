@@ -3,6 +3,7 @@ import { api } from "./api.js";
 import { toast } from "./toast.js";
 import { getCachedSection, refreshSection } from "./preload-client.js";
 import { makeSortable } from "./sortable.js";
+import { rowMenu, wireRowMenus } from "./ui.js";
 
 const TABS = [
   { id: "scanning", section: "scanning-exclusions" },
@@ -75,6 +76,25 @@ async function loadSide(side, tab) {
 function renderActive() {
   renderTable("source");
   renderTable("dest");
+  for (const t of TABS) {
+    const el = document.querySelector(`[data-count="${t.id}"]`);
+    const items = state.data[t.id].source;
+    if (el) el.textContent = Array.isArray(items) ? String(items.length) : "";
+  }
+}
+
+// Same identity the server's duplicate check uses, so dimming matches what a copy would skip.
+function itemKey(item) {
+  if (item.value !== undefined) return `${item.type}::${item.value}`;
+  if (item.properties !== undefined) return `${item.type}::${stableStringify(item.properties)}`;
+  return `${item.type}::${item.id}`;
+}
+
+function stableStringify(v) {
+  if (v === null || typeof v !== "object") return JSON.stringify(v);
+  if (Array.isArray(v)) return `[${v.map(stableStringify).join(",")}]`;
+  const entries = Object.entries(v).sort(([a], [b]) => a.localeCompare(b));
+  return `{${entries.map(([k, val]) => `${JSON.stringify(k)}:${stableStringify(val)}`).join(",")}}`;
 }
 
 function renderTable(side) {
@@ -94,43 +114,50 @@ function renderTable(side) {
     target.innerHTML = `<div class="empty-state">No items.</div>`;
     return;
   }
+  const other = state.data[type][side === "source" ? "dest" : "source"];
+  const otherKeys = new Set(Array.isArray(other) ? other.map(itemKey) : []);
   const rows = items
     .map((it) => {
       const checked = side === "source" && state.selectedSource.has(`${type}::${it.id}`) ? "checked" : "";
       const checkbox = side === "source"
-        ? `<td class="col-check"><input type="checkbox" data-id="${escapeAttr(it.id)}" ${checked}/></td>`
-        : `<td class="col-check"></td>`;
+        ? `<td class="col-check"><input type="checkbox" data-id="${escapeAttr(it.id)}" ${checked} aria-label="Select item"/></td>`
+        : "";
       const display = type === "scanning"
         ? `${escapeHtml(it.value || "")}`
         : `${escapeHtml(formatItemValue(it))}`;
       const actionCell = side === "dest"
-        ? `<td class="col-actions"><button class="btn btn-small btn-danger" data-delete-dest="${escapeAttr(it.id)}" data-display="${escapeAttr(typeof it.value === "string" ? it.value : formatItemValue(it))}">Delete</button></td>`
+        ? `<td class="col-actions">${rowMenu([{ label: "Delete from destination", icon: "trash", danger: true, attrs: `data-delete-dest="${escapeAttr(it.id)}" data-display="${escapeAttr(typeof it.value === "string" ? it.value : formatItemValue(it))}"` }])}</td>`
         : "";
+      const onBoth = otherKeys.has(itemKey(it));
+      const cls = [onBoth ? "is-dim" : "", checked ? "selected" : ""].filter(Boolean).join(" ");
       return `
-        <tr>
+        <tr${cls ? ` class="${cls}"` : ""}${onBoth ? ' title="Exists on both sides"' : ""}>
           ${checkbox}
-          <td><code>${escapeHtml(it.type || "")}</code></td>
-          <td>${display}</td>
-          <td>${escapeHtml(it.comment || "")}</td>
+          <td><span class="tag tag-muted">${escapeHtml(it.type || "")}</span></td>
+          <td class="mono-cell">${display}</td>
+          <td><span class="hint">${escapeHtml(it.comment || "")}</span></td>
           ${actionCell}
         </tr>`;
     })
     .join("");
-  const headerExtra = side === "dest" ? "<th></th>" : "";
+  const headerExtra = side === "dest" ? `<th class="col-actions"></th>` : "";
+  const checkHeader = side === "source" ? `<th class="col-check"></th>` : "";
   target.innerHTML = `
     <table class="data-table">
       <thead>
-        <tr><th class="col-check"></th><th>Kind</th><th>Value</th><th>Comment</th>${headerExtra}</tr>
+        <tr>${checkHeader}<th>Kind</th><th>Value</th><th>Comment</th>${headerExtra}</tr>
       </thead>
       <tbody>${rows}</tbody>
     </table>`;
   makeSortable(target);
+  wireRowMenus(target);
   if (side === "source") {
     target.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
       cb.addEventListener("change", (e) => {
         const key = `${type}::${e.target.dataset.id}`;
         if (e.target.checked) state.selectedSource.add(key);
         else state.selectedSource.delete(key);
+        e.target.closest("tr")?.classList.toggle("selected", e.target.checked);
         renderBasket();
       });
     });
@@ -138,8 +165,8 @@ function renderTable(side) {
   if (side === "dest") {
     target.querySelectorAll("[data-delete-dest]").forEach((btn) => {
       btn.addEventListener("click", async (e) => {
-        const id = e.target.dataset.deleteDest;
-        const display = e.target.dataset.display;
+        const id = e.currentTarget.dataset.deleteDest;
+        const display = e.currentTarget.dataset.display;
         const apiPath = type === "scanning" ? "scanning" : type;
         if (!confirm(`Delete this ${type} item from destination?\n\n${display}\n\nThis action is irreversible.`)) return;
         if (!confirm(`Are you absolutely sure? This item will be permanently removed.`)) return;
@@ -165,15 +192,15 @@ function formatItemValue(item) {
   const p = item.properties;
   if (p.fileName) return p.fileName;
   if (p.path) return p.path;
-  if (p.sha256) return `sha256: ${String(p.sha256).slice(0, 16)}…`;
+  if (p.sha256) return `sha256: ${String(p.sha256).slice(0, 16)}...`;
   if (p.certificateSigner) return `signer: ${p.certificateSigner}`;
   return JSON.stringify(p);
 }
 
 function wireTabs() {
-  document.querySelectorAll(".tab").forEach((tab) => {
+  document.querySelectorAll(".seg-btn[data-tab]").forEach((tab) => {
     tab.addEventListener("click", () => {
-      document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+      document.querySelectorAll(".seg-btn[data-tab]").forEach((t) => t.classList.remove("active"));
       tab.classList.add("active");
       state.activeTab = tab.dataset.tab;
       renderActive();
@@ -184,6 +211,7 @@ function wireTabs() {
 function renderBasket() {
   const basket = document.getElementById("selection-basket");
   document.getElementById("basket-count").textContent = String(state.selectedSource.size);
+  document.getElementById("basket-noun").textContent = state.selectedSource.size === 1 ? "source item selected" : "source items selected";
   basket.classList.toggle("hidden", state.selectedSource.size === 0);
 }
 

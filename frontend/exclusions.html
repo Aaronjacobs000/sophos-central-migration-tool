@@ -15,38 +15,39 @@
   <header id="app-nav" class="topbar"></header>
 
   <main class="page-main">
-    <h1>Exclusions &amp; allow/block lists</h1>
-    <p class="page-lead">Browse scanning exclusions, allowed items and blocked items on both
-      tenants. Select source items and copy them to destination.</p>
+    <h1>Exclusions and allow and block lists</h1>
+    <p class="page-lead">Global exclusions and lists on both tenants. Select source items and copy them to the
+      destination; items that already exist there are skipped. Rows that exist on both sides are dimmed.</p>
 
-    <div class="tabs">
-      <button class="tab active" data-tab="scanning">Scanning exclusions</button>
-      <button class="tab" data-tab="allowed-items">Allowed items</button>
-      <button class="tab" data-tab="blocked-items">Blocked items</button>
+    <div class="seg" role="tablist" aria-label="Exclusion type">
+      <button class="seg-btn active" role="tab" data-tab="scanning">Scanning exclusions <span class="seg-count" data-count="scanning"></span></button>
+      <button class="seg-btn" role="tab" data-tab="allowed-items">Allowed items <span class="seg-count" data-count="allowed-items"></span></button>
+      <button class="seg-btn" role="tab" data-tab="blocked-items">Blocked items <span class="seg-count" data-count="blocked-items"></span></button>
     </div>
 
     <div class="split-row">
       <section class="panel-card">
         <div class="panel-toolbar">
-          <h2>Source</h2>
+          <h2 class="side-title">Source</h2>
           <span class="spacer"></span>
           <button id="select-all-source" class="btn btn-small">Select all</button>
           <button id="clear-source" class="btn btn-small">Clear</button>
         </div>
-        <div id="table-source"><div class="empty-state">Loading…</div></div>
+        <div id="table-source"><div class="empty-state">Loading</div></div>
       </section>
       <section class="panel-card">
         <div class="panel-toolbar">
-          <h2>Destination</h2>
+          <h2 class="side-title is-dest">Destination</h2>
           <span class="spacer"></span>
         </div>
-        <div id="table-dest"><div class="empty-state">Loading…</div></div>
+        <div id="table-dest"><div class="empty-state">Loading</div></div>
       </section>
     </div>
   </main>
 
   <div id="selection-basket" class="selection-basket hidden">
-    <span><span id="basket-count">0</span> source items selected</span>
+    <span class="basket-text"><strong id="basket-count">0</strong> <span id="basket-noun">source items selected</span></span>
+    <span class="basket-sep"></span>
     <button id="basket-copy" class="btn btn-primary">Copy to destination</button>
   </div>
 

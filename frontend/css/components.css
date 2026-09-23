@@ -870,3 +870,11 @@ input:disabled { cursor: not-allowed; opacity: 0.5; }
 .compare-collapsible { cursor: help; text-decoration: underline dotted; text-decoration-color: var(--ink-4); }
 .compare-meta { margin-top: 2px; }
 .compare-meta td { vertical-align: middle; }
+
+/* ================= groups, exclusions ================= */
+.mono-cell { font-family: var(--mono); font-size: 12px; word-break: break-all; }
+.cell-name { font-weight: 550; color: var(--ink-1); }
+.data-table td .tag + .tag { margin-left: 4px; }
+.split-row > .panel-card { min-width: 0; }
+.split-row > .panel-card + .panel-card { margin-top: 0; }
+.split-row .panel-toolbar input[type="search"] { min-width: 140px; width: 160px; }
