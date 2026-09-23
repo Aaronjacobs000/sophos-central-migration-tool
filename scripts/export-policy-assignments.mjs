@@ -9,7 +9,7 @@
  * users, user groups, endpoints and endpoint groups the policy is assigned to
  * (the Sophos `appliesTo` block), resolving IDs to human-readable names.
  *
- * No dependencies — uses the global fetch in Node 18+.
+ * No dependencies: uses the global fetch in Node 18+.
  *
  * Usage:
  *   SOPHOS_CLIENT_ID=xxx SOPHOS_CLIENT_SECRET=yyy \
@@ -17,7 +17,7 @@
  *
  * Optional:
  *   POLICY_TYPES=peripheral-control,application-control,server-peripheral-control,server-application-control
- *   (default shown — server policies are distinct types in the API)
+ *   (default shown; server policies are distinct types in the API)
  *   Create the Client ID/Secret in the tenant under
  *   Global Settings > API Credentials (needs read access to Endpoint + Common).
  */
@@ -64,7 +64,7 @@ async function whoami(token) {
   const apiHost = w.apiHosts?.dataRegion;
   if (!apiHost) {
     throw new Error(
-      "No dataRegion host in whoami — these look like partner/org credentials. " +
+      "No dataRegion host in whoami: these look like partner/org credentials. " +
         "Run this with direct-tenant API credentials, or set a tenant explicitly.",
     );
   }

@@ -26,7 +26,7 @@ test("window: off, closed, closing, open, no limit", () => {
   assert.equal(far.noTimeLimit, true);
   assert.equal(evaluateMigrationWindow({ enabled: true }, NOW).noTimeLimit, true);
   assert.equal(evaluateMigrationWindow({}, NOW).status, "unknown");
-  for (const s of [open, closing, far]) assert.doesNotMatch(s.message, /[–—]/);
+  for (const s of [open, closing, far]) assert.doesNotMatch(s.message, /[\u2013\u2014]/);
 });
 
 test("window: reads the sending tenant for each direction, GET only", async () => {
@@ -90,7 +90,7 @@ test("licence analysis: short seats, missing features and no licence for a class
   assert.ok(a.families.find((f) => f.family === "encryption").missing);
   assert.ok(a.families.find((f) => f.family === "server").missing);
   assert.equal(a.families.find((f) => f.family === "mdr").missing, false);
-  for (const w of a.warnings) assert.doesNotMatch(w, /[–—]/);
+  for (const w of a.warnings) assert.doesNotMatch(w, /[\u2013\u2014]/);
 });
 
 test("licence check: calls the global host with the tenant scope header, GET only", async () => {

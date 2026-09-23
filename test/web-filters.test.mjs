@@ -171,7 +171,7 @@ test("policy clone: a profile missing on the destination drops the setting and s
   assert.equal(posts[0].body.settings[SCHEDULE_KEY], undefined);
   assert.ok(res.adjustments.some((a) => /profile "Staff" is not on the destination/.test(a)));
   assert.equal(posts[1].body.settings[PROFILE_KEY], undefined, "an ID unknown on the source is dropped too");
-  for (const a of res.adjustments) assert.doesNotMatch(a, /[–—]/);
+  for (const a of res.adjustments) assert.doesNotMatch(a, /[\u2013\u2014]/);
 });
 
 test("policy clone: policies without a web profile make no profile lookups", async () => {
