@@ -18,6 +18,13 @@ async function boot() {
   document.getElementById("search-input").addEventListener("keydown", (e) => {
     if (e.key === "Enter") doSearch();
   });
+
+  // The Ctrl K palette links here with ?q=<hostname>.
+  const q = new URLSearchParams(window.location.search).get("q");
+  if (q) {
+    document.getElementById("search-input").value = q;
+    doSearch();
+  }
 }
 
 async function doSearch() {

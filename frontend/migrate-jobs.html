@@ -8,8 +8,11 @@
   <link rel="stylesheet" href="/css/base.css" />
   <link rel="stylesheet" href="/css/components.css" />
 </head>
-<body>
-  <header id="app-nav" class="app-nav"></header>
+<body class="shell">
+  <div class="bg" aria-hidden="true"><div class="bg-glow bg-glow-a"></div><div class="bg-glow bg-glow-b"></div><div class="bg-glow bg-glow-c"></div><div class="bg-noise"></div></div>
+  <aside id="app-rail" class="rail"></aside>
+  <div class="shell-main">
+  <header id="app-nav" class="topbar"></header>
 
   <main class="page-main">
     <h1>Migration jobs</h1>
@@ -26,6 +29,7 @@
   </main>
 
   <footer id="page-footer" class="page-footer"></footer>
+  </div>
   <script type="module" src="/js/page-migrate-jobs.js"></script>
 </body>
 </html>
