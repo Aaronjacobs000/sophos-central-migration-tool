@@ -16,28 +16,28 @@
 
   <main class="page-main">
     <h1>Endpoint policies</h1>
-    <p class="page-lead">Policies grouped by product. Source policies are on the left,
-      destination on the right. Use the checkboxes on source policies to clone selected
-      items, or click Compare on a row that exists on both sides.</p>
+    <p class="page-lead">Policies grouped by product, source on the left and destination on the right.
+      Clone what only exists on the source, or compare a policy that exists on both sides.</p>
 
-    <div class="panel-toolbar">
-      <input type="search" id="search" placeholder="Filter by name…" />
+    <div class="panel-toolbar toolbar-bar">
+      <input type="search" id="search" placeholder="Filter by name" />
       <button id="export-assignments" class="btn btn-small"
-        title="Export Peripheral Control and Application Control policy assignments (source tenant, endpoint + server variants) to CSV. Assignments cannot be migrated: the Sophos public API does not accept assignment writes, so use this export to re-assign manually in the destination.">Export assignments (CSV)</button>
+        title="Export Peripheral Control and Application Control policy assignments (source tenant, endpoint and server variants) to CSV. Assignments cannot be migrated: the Sophos public API does not accept assignment writes, so use this export to re-assign them by hand in the destination."><span data-icon="download"></span>Export assignments (CSV)</button>
       <span class="spacer"></span>
-      <label class="checkbox" style="margin-top:0;">
+      <label class="checkbox">
         <input type="checkbox" id="hide-matching" disabled />
-        Hide products where every policy fully matches
+        Hide products where every policy matches
       </label>
       <span id="hide-matching-note" class="hint"></span>
-      <button id="refresh-match" class="btn btn-small">Refresh deep match</button>
+      <button id="refresh-match" class="btn btn-small"><span data-icon="refresh"></span>Refresh deep match</button>
     </div>
 
-    <div id="content"><div class="empty-state">Loading from preload cache…</div></div>
+    <div id="content"><div class="empty-state">Loading from the preload cache</div></div>
   </main>
 
   <div id="selection-basket" class="selection-basket hidden">
-    <span><span id="basket-count">0</span> source policies selected</span>
+    <span class="basket-text"><strong id="basket-count">0</strong> source policies selected</span>
+    <span class="basket-sep"></span>
     <button id="basket-compare" class="btn">Compare</button>
     <button id="basket-clone" class="btn btn-primary">Clone to destination</button>
   </div>

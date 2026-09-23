@@ -261,7 +261,15 @@ document.addEventListener("keydown", (e) => {
 
 // ---------- boot ----------
 
+// Static markup can ask for an icon with <span data-icon="name"></span>.
+function hydrateIcons() {
+  document.querySelectorAll("[data-icon]").forEach((el) => {
+    el.outerHTML = icon(el.dataset.icon);
+  });
+}
+
 async function bootNav() {
+  hydrateIcons();
   renderNav();
   renderFooter();
   try {

@@ -3,6 +3,8 @@ import { api } from "./api.js";
 import { toast } from "./toast.js";
 import { getCachedSection, refreshSection } from "./preload-client.js";
 import { makeSortable } from "./sortable.js";
+import { icon } from "./icons.js";
+import { rowMenu, wireRowMenus, stackBar } from "./ui.js";
 
 // Friendly labels for known Sophos endpoint policy types. Anything not in
 // this map falls back to title-casing the raw type slug.
@@ -37,7 +39,7 @@ const ASSIGNMENT_POLICY_TYPES = [
   "server-application-control",
 ];
 
-// CSV columns — identical to the standalone export script.
+// CSV columns, identical to the standalone export script.
 const ASSIGNMENT_CSV_HEADER = [
   "policy_name", "policy_type", "enabled", "priority",
   "assignee_kind", "assignee_name", "assignee_id",
@@ -120,19 +122,19 @@ function updateToggleState() {
   if (state.matchStatus === "ready") {
     toggle.disabled = false;
     const total = state.matchByKey.size;
-    note.textContent = `(deep match ready · ${total} policies analysed)`;
+    note.textContent = `Deep match ready, ${total} policies compared`;
     note.className = "hint";
   } else if (state.matchStatus === "loading") {
     toggle.disabled = true;
     if (state.hideMatching === false) {
       // toggle is unchecked anyway, just show the loading hint
     }
-    note.textContent = "(computing deep match… this can take a moment for tenants with many policies)";
+    note.innerHTML = `<span class="spin"></span> Comparing settings on both sides, this can take a moment`;
     note.className = "hint";
   } else if (state.matchStatus === "error") {
     toggle.disabled = true;
-    note.innerHTML = `(deep match failed: ${escapeHtml(state.matchError ?? "unknown error")} · <a href="#" id="retry-deep">retry</a>)`;
-    note.className = "hint banner-err";
+    note.innerHTML = `Deep match failed: ${escapeHtml(state.matchError ?? "unknown error")}. <a href="#" id="retry-deep">Retry</a>`;
+    note.className = "hint is-bad";
     document.getElementById("retry-deep")?.addEventListener("click", (e) => {
       e.preventDefault();
       loadDeepMatch(true);
@@ -170,7 +172,7 @@ function render() {
         ${state.source?.error ? `<div><strong>Source:</strong> ${escapeHtml(state.source.error)}</div>` : ""}
         ${state.dest?.error ? `<div><strong>Dest:</strong> ${escapeHtml(state.dest.error)}</div>` : ""}
       </div>
-      <button class="btn" id="retry-btn" style="margin-top:0.85rem;">Retry preload</button>
+      <button class="btn mt" id="retry-btn">Retry preload</button>
     `;
     document.getElementById("retry-btn").addEventListener("click", async () => {
       content.innerHTML = `<div class="empty-state">Refreshing…</div>`;
@@ -189,7 +191,7 @@ function render() {
   }
 
   if (state.source?.loading || state.dest?.loading) {
-    content.innerHTML = `<div class="empty-state">Preload still in progress. The dashboard shows live status.</div>`;
+    content.innerHTML = `<div class="empty-state">Preload is still running. The dashboard shows live status.</div>`;
     return;
   }
 
@@ -302,7 +304,7 @@ function renderProductSection(type, srcList, dstList) {
 
   const label = productLabel(type);
 
-  // Compute a per-product summary using the deep match data when available.
+  // Per-product summary from the deep match, when it is ready.
   const productStats = computeProductStats(type, srcList, dstList);
   const productBadge = renderProductBadge(productStats);
 
@@ -311,19 +313,18 @@ function renderProductSection(type, srcList, dstList) {
     const checked = state.selectedSource.has(p.id) ? "checked" : "";
     const matchInfo = lookupMatch(p);
     const statusBadge = renderStatusBadge(matchInfo, inDest);
-    const compareBtn = inDest
+    const action = inDest
       ? `<button class="btn btn-small" data-compare="${escapeAttr(p.id)}">Compare</button>`
       : `<button class="btn btn-small btn-primary" data-clone="${escapeAttr(p.id)}">Clone</button>`;
-    const enabled = p.enabled === false ? "off" : "on";
     return `
-      <tr>
-        <td class="col-check"><input type="checkbox" data-id="${escapeAttr(p.id)}" ${checked}/></td>
-        <td>
+      <tr${checked ? ' class="selected"' : ""}>
+        <td class="col-check"><input type="checkbox" data-id="${escapeAttr(p.id)}" ${checked} aria-label="Select ${escapeAttr(p.name)}"/></td>
+        <td class="cell-name">
           <a href="/policy-detail.html?side=source&id=${encodeURIComponent(p.id)}">${escapeHtml(p.name)}</a>
           ${statusBadge}
         </td>
-        <td><span class="hint">${enabled}</span></td>
-        <td class="col-actions">${compareBtn}</td>
+        <td class="cell-state">${enabledCell(p)}</td>
+        <td class="col-actions">${action}</td>
       </tr>`;
   };
 
@@ -331,17 +332,17 @@ function renderProductSection(type, srcList, dstList) {
     const inSource = srcNames.has(p.name.toLowerCase());
     const matchInfo = lookupMatch(p);
     const statusBadge = renderStatusBadge(matchInfo, inSource, "dest");
-    const enabled = p.enabled === false ? "off" : "on";
+    const menu = rowMenu([
+      { label: "Delete from destination", icon: "trash", danger: true, attrs: `data-delete-dest="${escapeAttr(p.id)}" data-name="${escapeAttr(p.name)}"` },
+    ]);
     return `
       <tr>
-        <td>
+        <td class="cell-name">
           <a href="/policy-detail.html?side=dest&id=${encodeURIComponent(p.id)}">${escapeHtml(p.name)}</a>
           ${statusBadge}
         </td>
-        <td><span class="hint">${enabled}</span></td>
-        <td class="col-actions">
-          <button class="btn btn-small btn-danger" data-delete-dest="${escapeAttr(p.id)}" data-name="${escapeAttr(p.name)}" title="Delete from destination">Delete</button>
-        </td>
+        <td class="cell-state">${enabledCell(p)}</td>
+        <td class="col-actions">${menu}</td>
       </tr>`;
   };
 
@@ -350,7 +351,7 @@ function renderProductSection(type, srcList, dstList) {
       ? `<div class="empty-state">No source policies${q ? " match the filter" : ""}.</div>`
       : `<table class="data-table">
            <thead>
-             <tr><th class="col-check"></th><th>Name</th><th>Enabled</th><th></th></tr>
+             <tr><th class="col-check"></th><th>Name</th><th>State</th><th class="col-actions"></th></tr>
            </thead>
            <tbody>${srcFiltered.map(renderSrcRow).join("")}</tbody>
          </table>`;
@@ -360,7 +361,7 @@ function renderProductSection(type, srcList, dstList) {
       ? `<div class="empty-state">No destination policies${q ? " match the filter" : ""}.</div>`
       : `<table class="data-table">
            <thead>
-             <tr><th>Name</th><th>Enabled</th><th></th></tr>
+             <tr><th>Name</th><th>State</th><th class="col-actions"></th></tr>
            </thead>
            <tbody>${dstFiltered.map(renderDstRow).join("")}</tbody>
          </table>`;
@@ -370,22 +371,28 @@ function renderProductSection(type, srcList, dstList) {
       <header class="product-header">
         <h2>${escapeHtml(label)}</h2>
         <code class="product-type-tag">${escapeHtml(type)}</code>
-        ${productBadge}
         <span class="spacer"></span>
-        <span class="hint">${srcList.length} source · ${dstList.length} dest</span>
+        <span class="hint tnum">${srcList.length} source · ${dstList.length} destination</span>
       </header>
+      ${productBadge}
       <div class="product-split">
         <div class="product-side">
-          <div class="product-side-label">Source</div>
+          <div class="product-side-label side-title">Source</div>
           ${srcTable}
         </div>
         <div class="product-side">
-          <div class="product-side-label">Destination</div>
+          <div class="product-side-label side-title is-dest">Destination</div>
           ${dstTable}
         </div>
       </div>
     </section>
   `;
+}
+
+function enabledCell(p) {
+  return p.enabled === false
+    ? `<span class="tag tag-muted">Off</span>`
+    : `<span class="hint">On</span>`;
 }
 
 function computeProductStats(type, srcList, dstList) {
@@ -413,62 +420,62 @@ function computeProductStats(type, srcList, dstList) {
 }
 
 function renderProductBadge(stats) {
-  if (!stats || stats.total === 0) return "";
-  const parts = [];
-  if (stats.differ) parts.push(`<span class="diff-pill diff-pill-change">${stats.differ} differ</span>`);
-  if (stats.sourceOnly) parts.push(`<span class="diff-pill diff-pill-add">${stats.sourceOnly} source only</span>`);
-  if (stats.destOnly) parts.push(`<span class="diff-pill diff-pill-remove">${stats.destOnly} dest only</span>`);
-  if (parts.length === 0 && stats.match > 0) {
-    parts.push(`<span class="diff-pill diff-pill-add" style="background:rgba(92,194,107,0.12); color:var(--status-ok); border-color:rgba(92,194,107,0.3);">all ${stats.match} match</span>`);
+  if (!stats || stats.total === 0) {
+    return `<div class="product-bar is-pending">${state.matchStatus === "loading" ? `<span class="hint"><span class="spin"></span> Comparing</span>` : ""}</div>`;
   }
-  return parts.join(" ");
+  const item = (n, cls, text) => (n ? `<span class="${cls}"><i></i><b>${n}</b> ${text}</span>` : "");
+  return `
+    <div class="product-bar">
+      ${stackBar(stats)}
+      <span class="legend">
+        ${item(stats.match, "l-match", "match")}
+        ${item(stats.differ, "l-differ", "differ")}
+        ${item(stats.sourceOnly, "l-src", "source only")}
+        ${item(stats.destOnly, "l-dst", "destination only")}
+      </span>
+    </div>`;
 }
 
 function renderStatusBadge(matchInfo, hasCounterpart, side = "source") {
   if (state.matchStatus !== "ready") return "";
   if (!matchInfo) return "";
 
-  const style = "margin-left:0.4rem;";
   if (matchInfo.status === "match") {
-    return `<span class="diff-pill diff-pill-add" style="${style} background:rgba(92,194,107,0.12); color:var(--status-ok); border-color:rgba(92,194,107,0.3);" title="settings match">✓ match</span>`;
+    return `<span class="tag tag-ok" title="Settings match">${icon("check")}match</span>`;
   }
   if (matchInfo.status === "differ") {
     const count = matchInfo.diffCount > 0 ? `${matchInfo.diffCount} change${matchInfo.diffCount === 1 ? "" : "s"}` : "differs";
-    return `<span class="diff-pill diff-pill-change" style="${style}" title="settings differ">${escapeHtml(count)}</span>`;
+    return `<span class="tag tag-warn" title="Settings differ">${escapeHtml(count)}</span>`;
   }
   if (matchInfo.status === "source-only") {
-    if (side === "source") {
-      return `<span class="diff-pill diff-pill-add" style="${style}">only source</span>`;
-    }
-    return "";
+    return side === "source" ? `<span class="tag tag-src">source only</span>` : "";
   }
   if (matchInfo.status === "dest-only") {
-    if (side === "dest") {
-      return `<span class="diff-pill diff-pill-remove" style="${style}">only dest</span>`;
-    }
-    return "";
+    return side === "dest" ? `<span class="tag tag-dst">destination only</span>` : "";
   }
   return "";
 }
 
 function wireRows() {
+  wireRowMenus(document.getElementById("content"));
   document.querySelectorAll('input[type="checkbox"][data-id]').forEach((cb) => {
     cb.addEventListener("change", (e) => {
       const id = e.target.dataset.id;
       if (e.target.checked) state.selectedSource.add(id);
       else state.selectedSource.delete(id);
+      e.target.closest("tr")?.classList.toggle("selected", e.target.checked);
       renderBasket();
     });
   });
   document.querySelectorAll("[data-compare]").forEach((btn) => {
     btn.addEventListener("click", (e) => {
-      const id = e.target.dataset.compare;
+      const id = e.currentTarget.dataset.compare;
       window.location.href = `/policy-compare.html?sourceId=${encodeURIComponent(id)}`;
     });
   });
   document.querySelectorAll("[data-clone]").forEach((btn) => {
     btn.addEventListener("click", async (e) => {
-      const id = e.target.dataset.clone;
+      const id = e.currentTarget.dataset.clone;
       if (!confirm("Clone this policy to destination?")) return;
       try {
         const res = await api.post("/api/migrate/policies", {
@@ -488,8 +495,8 @@ function wireRows() {
   });
   document.querySelectorAll("[data-delete-dest]").forEach((btn) => {
     btn.addEventListener("click", async (e) => {
-      const id = e.target.dataset.deleteDest;
-      const name = e.target.dataset.name;
+      const id = e.currentTarget.dataset.deleteDest;
+      const name = e.currentTarget.dataset.name;
       if (!confirm(`Delete the destination policy "${name}"?\n\nThis action is irreversible.`)) return;
       // Second confirmation for destructive ops
       if (!confirm(`Are you absolutely sure? "${name}" will be permanently removed from the destination tenant.`)) return;
@@ -570,7 +577,7 @@ async function exportAssignments() {
   const btn = document.getElementById("export-assignments");
   const original = btn.textContent;
   btn.disabled = true;
-  btn.textContent = "Building CSV…";
+  btn.textContent = "Building CSV";
   try {
     const sourcePolicies = Array.isArray(state.source) ? state.source : [];
     const policies = sourcePolicies.filter((p) =>
@@ -622,7 +629,7 @@ async function exportAssignments() {
  * Build an id -> name resolver for assignment targets on the source tenant.
  * Reuses the preload cache for endpoints and endpoint groups; user groups and
  * directory users are fetched on demand (not preloaded). Any source that fails
- * to load is skipped — unresolved IDs fall back to the raw ID.
+ * to load is skipped; unresolved IDs fall back to the raw ID.
  */
 async function buildAssignmentNameResolver() {
   const [endpoints, endpointGroups, userGroups, users] = await Promise.all([

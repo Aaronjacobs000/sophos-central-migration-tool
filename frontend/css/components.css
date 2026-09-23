@@ -818,3 +818,16 @@ input:disabled { cursor: not-allowed; opacity: 0.5; }
 @media (max-width: 1100px) {
   .journey { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* ================= policies ================= */
+.toolbar-bar { padding: 10px 12px; border-radius: 14px; border: 1px solid var(--line); background: var(--panel); backdrop-filter: blur(18px) saturate(140%); -webkit-backdrop-filter: blur(18px) saturate(140%); margin-bottom: 16px; }
+.toolbar-bar .hint .spin { width: 10px; height: 10px; vertical-align: -1px; margin-right: 4px; }
+.product-bar { display: flex; align-items: center; gap: 14px; margin: -2px 0 14px; min-height: 18px; }
+.product-bar .stack-bar { flex: 0 0 220px; }
+.product-bar.is-pending { min-height: 0; margin: 0 0 8px; }
+.product-bar .hint .spin { width: 10px; height: 10px; vertical-align: -1px; margin-right: 4px; }
+.product-side-label { font-size: 11px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); }
+.product-section .data-table th:first-child.col-check + th, .product-section .cell-name { width: auto; }
+.product-section .cell-name a { margin-right: 6px; }
+.product-section .cell-name .tag { margin: 2px 0; }
+.product-section .cell-state { width: 64px; }
