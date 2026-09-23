@@ -159,8 +159,10 @@ function renderSideDetails(side, data) {
 async function loadJourney() {
   if (journeyRequested) return;
   journeyRequested = true;
-  const [deep, groupsS, groupsD, scanS, scanD, allowS, allowD, blockS, blockD, epS, epD, jobs] = await Promise.all([
-    api.get("/api/compare/policies/deep").catch((err) => ({ error: err.message })),
+  // The cached sections and the job list come back at once; the deep policy
+  // match can take a while on a large tenant, so its counts fill in after.
+  const deepPromise = api.get("/api/compare/policies/deep").catch((err) => ({ error: err.message }));
+  const [groupsS, groupsD, scanS, scanD, allowS, allowD, blockS, blockD, epS, epD, jobs] = await Promise.all([
     cached("source", "groups"), cached("dest", "groups"),
     cached("source", "scanning-exclusions"), cached("dest", "scanning-exclusions"),
     cached("source", "allowed-items"), cached("dest", "allowed-items"),
@@ -169,9 +171,6 @@ async function loadJourney() {
     api.get("/api/migrate/devices/jobs").then((r) => r.items ?? []).catch(() => null),
   ]);
 
-  const policyCounts = deep?.matches
-    ? countMatches(deep.matches)
-    : null;
   const groupsMissing = groupsS && groupsD ? onlyOnSource(groupsS, groupsD, (g) => (g.name ?? "").toLowerCase()) : null;
   const exclusionsMissing = [
     [scanS, scanD, (x) => `${x.type}::${x.value}`],
@@ -179,7 +178,11 @@ async function loadJourney() {
     [blockS, blockD, (x) => `${x.type}::${JSON.stringify(x.properties ?? {})}`],
   ].reduce((sum, [s, d, key]) => (sum === null || !s || !d ? null : sum + onlyOnSource(s, d, key)), 0);
 
-  journeyData = { deep, policyCounts, groupsMissing, exclusionsMissing, epS, epD, jobs };
+  journeyData = { deep: null, policyCounts: null, groupsMissing, exclusionsMissing, epS, epD, jobs };
+  renderJourney(journeyData);
+
+  const deep = await deepPromise;
+  journeyData = { ...journeyData, deep, policyCounts: deep?.matches ? countMatches(deep.matches) : null };
   renderJourney(journeyData);
 }
 
@@ -271,8 +274,8 @@ function renderJourney(data) {
       state: eligible ? "ok" : "muted",
       tag: `${eligible} ready to move`,
       lines: [
-        `Source: <b>${data.epS.length}</b> devices${stale ? `, <b>${stale}</b> stale` : ""}`,
-        `Destination: <b>${data.epD ? data.epD.length : "?"}</b> devices`,
+        `Source: <b>${data.epS.length}</b> device${data.epS.length === 1 ? "" : "s"}${stale ? `, <b>${stale}</b> stale` : ""}`,
+        `Destination: <b>${data.epD ? data.epD.length : "?"}</b> device${data.epD?.length === 1 ? "" : "s"}`,
       ],
     };
   }

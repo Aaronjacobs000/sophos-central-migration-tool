@@ -280,9 +280,10 @@ export function renderValue(v, missing, role = "") {
     if (v.every((x) => x === null || typeof x !== "object")) {
       return v.map((x) => `<span class="chip${cls}">${formatPrimitive(x)}</span>`).join(" ");
     }
-    return `<span class="chip compare-collapsible${cls}" title="${escapeAttr(JSON.stringify(v, null, 2))}">${v.length} items</span>`;
+    return `<span class="chip compare-collapsible${cls}" title="${escapeAttr(JSON.stringify(v, null, 2))}">${v.length} item${v.length === 1 ? "" : "s"}</span>`;
   }
-  return `<span class="chip compare-collapsible${cls}" title="${escapeAttr(JSON.stringify(v, null, 2))}">${Object.keys(v).length} keys</span>`;
+  const n = Object.keys(v).length;
+  return `<span class="chip compare-collapsible${cls}" title="${escapeAttr(JSON.stringify(v, null, 2))}">${n} key${n === 1 ? "" : "s"}</span>`;
 }
 
 function formatPrimitive(v) {
