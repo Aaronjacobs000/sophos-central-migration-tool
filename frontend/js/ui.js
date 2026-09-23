@@ -81,3 +81,57 @@ export function stackBar(c) {
   const seg = (n, cls) => (n ? `<span class="${cls}" style="flex:${n}"></span>` : "");
   return `<div class="stack-bar" role="img" aria-label="${escAttr(`${c.match ?? 0} match, ${c.differ ?? 0} differ, ${c.sourceOnly ?? 0} source only, ${c.destOnly ?? 0} destination only`)}">${seg(c.match, "s-match")}${seg(c.differ, "s-differ")}${seg(c.sourceOnly, "s-src")}${seg(c.destOnly, "s-dst")}</div>`;
 }
+
+const OUTCOME = {
+  created: `<span class="tag tag-ok">created</span>`,
+  "would-create": `<span class="tag tag-accent">would create</span>`,
+  skipped: `<span class="tag tag-muted">already there</span>`,
+  failed: `<span class="tag tag-bad">failed</span>`,
+  added: `<span class="tag tag-ok">added</span>`,
+  "would-add": `<span class="tag tag-accent">would add</span>`,
+  waiting: `<span class="tag tag-muted">waiting</span>`,
+};
+
+/** Outcome name for a copy result from any of the migrate routes. */
+export function outcomeOf(r) {
+  if (!r.ok) return "failed";
+  if (r.action === "skip-exists") return "skipped";
+  if (String(r.action).startsWith("dry-run")) return "would-create";
+  return "created";
+}
+
+/**
+ * Modal listing what a preview or a copy did.
+ * groups: [{ title, rows: [{ outcome, text, error, notes }] }]
+ */
+export function resultsModal({ title, summary, groups }) {
+  document.getElementById("results-modal")?.remove();
+  const body = groups.filter((g) => g.rows.length).map((g) => `
+    <h3>${esc(g.title)}</h3>
+    <ul class="result-list">${g.rows.map((r) => `
+      <li class="result-row">
+        ${OUTCOME[r.outcome] ?? ""}
+        <span class="mono-cell">${esc(r.text)}</span>
+        ${r.error ? `<span class="ep-error">${esc(r.error)}</span>` : ""}
+        ${(r.notes ?? []).length ? `<ul class="result-notes">${r.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` : ""}
+      </li>`).join("")}
+    </ul>`).join("");
+  const modal = document.createElement("div");
+  modal.id = "results-modal";
+  modal.className = "modal-overlay";
+  modal.innerHTML = `
+    <div class="modal-card" role="dialog" aria-label="${escAttr(title)}">
+      <header class="modal-header">
+        <h2>${esc(title)}</h2>
+        <button class="icon-btn modal-close" title="Close" aria-label="Close">${icon("x")}</button>
+      </header>
+      <div class="modal-body">
+        ${summary ? `<p class="hint">${esc(summary)}</p>` : ""}
+        ${body || `<div class="empty-state">Nothing to show.</div>`}
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.querySelector(".modal-close").addEventListener("click", () => modal.remove());
+  modal.addEventListener("click", (e) => { if (e.target === modal) modal.remove(); });
+  return modal;
+}

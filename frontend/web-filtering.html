@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Web filtering · Sophos Fusion Tenant Migration</title>
+  <link rel="icon" href="/mark.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/css/base.css" />
+  <link rel="stylesheet" href="/css/components.css" />
+</head>
+<body class="shell">
+  <div class="bg" aria-hidden="true"><div class="bg-glow bg-glow-a"></div><div class="bg-glow bg-glow-b"></div><div class="bg-glow bg-glow-c"></div><div class="bg-noise"></div></div>
+  <aside id="app-rail" class="rail"></aside>
+  <div class="shell-main">
+  <header id="app-nav" class="topbar"></header>
+
+  <main class="page-main">
+    <h1>Web filtering</h1>
+    <p class="page-lead">Site lists and web filtering profiles on both tenants. Copy site lists first, then profiles:
+      a profile points at site lists, and the copy maps them to lists with the same name on the destination.
+      Cloning a web control policy then maps its web profile to the destination profile with the same name.</p>
+
+    <div class="seg" role="tablist" aria-label="Web filtering item">
+      <button class="seg-btn active" role="tab" data-tab="site-lists">Site lists <span class="seg-count" data-count="site-lists"></span></button>
+      <button class="seg-btn" role="tab" data-tab="profiles">Profiles <span class="seg-count" data-count="profiles"></span></button>
+    </div>
+
+    <div class="split-row">
+      <section class="panel-card">
+        <div class="panel-toolbar">
+          <h2 class="side-title">Source</h2>
+          <span class="spacer"></span>
+          <button id="select-all-source" class="btn btn-small">Select all</button>
+          <button id="clear-source" class="btn btn-small">Clear</button>
+        </div>
+        <div id="table-source"><div class="empty-state">Loading</div></div>
+      </section>
+      <section class="panel-card">
+        <div class="panel-toolbar">
+          <h2 class="side-title is-dest">Destination</h2>
+          <span class="spacer"></span>
+        </div>
+        <div id="table-dest"><div class="empty-state">Loading</div></div>
+      </section>
+    </div>
+  </main>
+
+  <div id="selection-basket" class="selection-basket hidden">
+    <span class="basket-text"><strong id="basket-count">0</strong> <span id="basket-noun">items selected</span></span>
+    <span class="basket-sep"></span>
+    <button id="basket-preview" class="btn">Preview</button>
+    <button id="basket-copy" class="btn btn-primary">Copy to destination</button>
+  </div>
+
+  <footer id="page-footer" class="page-footer"></footer>
+  </div>
+  <script type="module" src="/js/page-web-filtering.js"></script>
+</body>
+</html>

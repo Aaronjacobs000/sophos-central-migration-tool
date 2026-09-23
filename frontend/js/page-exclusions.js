@@ -3,8 +3,7 @@ import { api } from "./api.js";
 import { toast } from "./toast.js";
 import { getCachedSection, refreshSection } from "./preload-client.js";
 import { makeSortable } from "./sortable.js";
-import { rowMenu, wireRowMenus, esc, plural } from "./ui.js";
-import { icon } from "./icons.js";
+import { rowMenu, wireRowMenus, plural, resultsModal, outcomeOf } from "./ui.js";
 
 // The first three types come from the preload cache and can be deleted on
 // the destination. The rest are read on demand and are copy only.
@@ -387,40 +386,21 @@ function describe(type, id) {
 }
 
 function showResults(results, dryRun) {
-  document.getElementById("results-modal")?.remove();
-  const outcome = (r) => {
-    if (!r.ok) return `<span class="tag tag-bad">failed</span>`;
-    if (r.action === "skip-exists") return `<span class="tag tag-muted">already there</span>`;
-    if (r.action === "dry-run-create") return `<span class="tag tag-accent">would create</span>`;
-    return `<span class="tag tag-ok">created</span>`;
-  };
-  const groups = TABS.filter((t) => results.some((r) => r.type === t.id)).map((t) => {
-    const rows = results.filter((r) => r.type === t.id).map((r) => `
-      <li class="result-row">
-        ${outcome(r)}
-        <span class="mono-cell">${esc(describe(t.id, r.sourceId))}</span>
-        ${r.error ? `<span class="ep-error">${esc(r.error)}</span>` : ""}
-      </li>`).join("");
-    return `<h3>${esc(t.label.charAt(0).toUpperCase() + t.label.slice(1))}s</h3><ul class="result-list">${rows}</ul>`;
-  }).join("");
   const creates = results.filter((r) => r.ok && (r.action === "create" || r.action === "dry-run-create")).length;
-  const modal = document.createElement("div");
-  modal.id = "results-modal";
-  modal.className = "modal-overlay";
-  modal.innerHTML = `
-    <div class="modal-card" role="dialog" aria-label="${dryRun ? "Preview" : "Copy results"}">
-      <header class="modal-header">
-        <h2>${dryRun ? "Preview: nothing was written" : "Copy results"}</h2>
-        <button class="icon-btn modal-close" title="Close" aria-label="Close">${icon("x")}</button>
-      </header>
-      <div class="modal-body">
-        <p class="hint">${dryRun ? `${plural(creates, "item")} would be created on the destination.` : `${plural(creates, "item")} created on the destination. Each write is in data/audit.log.`}</p>
-        ${groups}
-      </div>
-    </div>`;
-  document.body.appendChild(modal);
-  modal.querySelector(".modal-close").addEventListener("click", () => modal.remove());
-  modal.addEventListener("click", (e) => { if (e.target === modal) modal.remove(); });
+  resultsModal({
+    title: dryRun ? "Preview: nothing was written" : "Copy results",
+    summary: dryRun
+      ? `${plural(creates, "item")} would be created on the destination.`
+      : `${plural(creates, "item")} created on the destination. Each write is in data/audit.log.`,
+    groups: TABS.map((t) => ({
+      title: `${t.label.charAt(0).toUpperCase() + t.label.slice(1)}s`,
+      rows: results.filter((r) => r.type === t.id).map((r) => ({
+        outcome: outcomeOf(r),
+        text: describe(t.id, r.sourceId),
+        error: r.error,
+      })),
+    })),
+  });
 }
 
 function escapeHtml(s) {

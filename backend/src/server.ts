@@ -19,6 +19,7 @@ import { preloadRouter } from "./routes/preload.js";
 import { logsRouter } from "./routes/logs.js";
 import { searchRouter } from "./routes/search.js";
 import { checksRouter } from "./routes/checks.js";
+import { webFiltersRouter, migrateWebFiltersRouter } from "./routes/web-filters.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -53,12 +54,14 @@ async function main() {
   app.use("/api", logsRouter);
   app.use("/api", searchRouter);
   app.use("/api", checksRouter);
+  app.use("/api", migrateWebFiltersRouter);
 
   // --- Per-side resource APIs (guarded by requireConfigured) ---
   app.use("/api", policiesRouter);
   app.use("/api", groupsRouter);
   app.use("/api", exclusionsRouter);
   app.use("/api", endpointsRouter);
+  app.use("/api", webFiltersRouter);
 
   // --- Static frontend ---
   const FRONTEND_DIR = path.join(REPO_ROOT, "frontend");

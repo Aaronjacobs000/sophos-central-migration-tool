@@ -4,14 +4,20 @@
  *
  * Policy ASSIGNMENTS (`appliesTo`) are deliberately NOT migrated: the Central
  * public API rejects every `appliesTo` write (verified 02/07/2026 on live
- * tenants — create and PATCH, string and {id} ref shapes, computer and server
+ * tenants: create and PATCH, string and {id} ref shapes, computer and server
  * policies, against targets that definitely exist all fail with
  * 500 "Error processing data"; GET returns the block fine). Use the Policies
  * page "Export assignments (CSV)" to capture them for manual re-assignment.
+ *
+ * Web control policies name their web filtering profile by ID. The source
+ * tenant's IDs mean nothing on the destination, so the ID is mapped to the
+ * destination profile with the same name, or the setting is dropped and
+ * reported when there is none.
  */
 
 import { getPolicy, listPolicies, createPolicy, updatePolicy } from "../sophos/api/policies.js";
 import { listLocalSites } from "../sophos/api/web-control.js";
+import { listProfiles } from "../sophos/api/web-filters.js";
 import { requireContext } from "../state.js";
 import { audit } from "./audit-log.js";
 import type { SophosPolicy } from "../sophos/types/migration.js";
@@ -61,6 +67,21 @@ export async function migratePolicies(
       return tags;
     })());
 
+  // Web filtering profiles on both sides, looked up at most once per run and
+  // only when a policy refers to one.
+  let profileMapPromise: Promise<WebProfileMap> | undefined;
+  const webProfiles = () =>
+    (profileMapPromise ??= (async () => {
+      const [s, d] = await Promise.all([
+        listProfiles(src.client, src.tenantId),
+        listProfiles(dst.client, dst.tenantId),
+      ]);
+      return {
+        sourceNameById: new Map(s.map((p) => [p.id, p.name])),
+        destIdByName: new Map(d.map((p) => [p.name.trim().toLowerCase(), p.id])),
+      };
+    })());
+
   const results: MigratePolicyResult[] = [];
 
   for (const sourceId of req.policyIds) {
@@ -104,7 +125,7 @@ export async function migratePolicies(
     };
 
     // Notes about anything we had to change to make the policy writable on
-    // the destination — surfaced in the result so nothing is silently lost.
+    // the destination, surfaced in the result so nothing is silently lost.
     const adjustments: string[] = [];
 
     // Web-control policies reference Website Management tags by name inside
@@ -122,7 +143,7 @@ export async function migratePolicies(
           tagsSetting.value = tagsSetting.value.filter((rule) => available.has(rule?.tag ?? ""));
           for (const rule of dropped) {
             adjustments.push(
-              `dropped website tag rule "${rule?.tag}" — that tag doesn't exist in the destination tenant (create its Website Management entries first, then re-migrate)`,
+              `dropped website tag rule "${rule?.tag}": that tag doesn't exist in the destination tenant (create its Website Management entries first, then re-migrate)`,
             );
           }
         }
@@ -130,6 +151,8 @@ export async function migratePolicies(
         // Tag lookup is best-effort; if it fails we attempt the write as-is.
       }
     }
+
+    await remapWebProfiles(body.settings, webProfiles, adjustments);
 
     if (req.dryRun) {
       results.push({
@@ -166,7 +189,7 @@ export async function migratePolicies(
             settingKey in body.settings
           ) {
             delete body.settings[settingKey];
-            adjustments.push(`dropped setting ${settingKey} — destination rejected it (${msg})`);
+            adjustments.push(`dropped setting ${settingKey}: destination rejected it (${msg})`);
             continue;
           }
           throw err;
@@ -226,6 +249,92 @@ export async function migratePolicies(
   }
 
   return results;
+}
+
+export interface WebProfileMap {
+  sourceNameById: Map<string, string>;
+  destIdByName: Map<string, string>;
+}
+
+const WEB_PROFILE_ID_SUFFIX = ".web-profile-id";
+const WEB_PROFILE_SCHEDULES_SUFFIX = ".web-profile-schedules";
+
+/**
+ * Point a policy's web profile at the destination. The profile ID setting
+ * (endpoint.web-control.web-profile-id) is mapped by profile name. Any source
+ * profile ID inside the schedules setting is mapped the same way. A profile
+ * with no destination counterpart drops the setting, and every change is
+ * added to adjustments.
+ */
+export async function remapWebProfiles(
+  settings: Record<string, unknown> | undefined,
+  loadMap: () => Promise<WebProfileMap>,
+  adjustments: string[],
+): Promise<void> {
+  if (!settings) return;
+  const idKeys = Object.keys(settings).filter((k) => {
+    const v = (settings[k] as { value?: unknown } | undefined)?.value;
+    return k.endsWith(WEB_PROFILE_ID_SUFFIX) && typeof v === "string" && v.length > 0;
+  });
+  const scheduleKeys = Object.keys(settings).filter((k) => k.endsWith(WEB_PROFILE_SCHEDULES_SUFFIX));
+  if (idKeys.length === 0 && scheduleKeys.length === 0) return;
+
+  let map: WebProfileMap;
+  try {
+    map = await loadMap();
+  } catch (err) {
+    adjustments.push(`could not look up web filtering profiles, so the web profile ID was sent unchanged (${errMsg(err)})`);
+    return;
+  }
+  const destIdFor = (sourceId: string) => {
+    const name = map.sourceNameById.get(sourceId);
+    return { name, destId: name ? map.destIdByName.get(name.trim().toLowerCase()) : undefined };
+  };
+
+  for (const key of idKeys) {
+    const setting = settings[key] as { value: string };
+    const { name, destId } = destIdFor(setting.value);
+    if (destId) {
+      settings[key] = { ...setting, value: destId };
+      adjustments.push(`mapped web profile "${name}" to the destination profile with the same name`);
+    } else {
+      delete settings[key];
+      adjustments.push(
+        name
+          ? `dropped the web profile setting: profile "${name}" is not on the destination (copy it on the Web filtering page first, then clone again)`
+          : `dropped the web profile setting: profile ${setting.value} was not found on the source`,
+      );
+    }
+  }
+
+  for (const key of scheduleKeys) {
+    const missing: string[] = [];
+    let changed = false;
+    const walk = (v: unknown): unknown => {
+      if (typeof v === "string" && map.sourceNameById.has(v)) {
+        const { name, destId } = destIdFor(v);
+        if (destId) {
+          changed = changed || destId !== v;
+          return destId;
+        }
+        missing.push(name ?? v);
+        return v;
+      }
+      if (Array.isArray(v)) return v.map(walk);
+      if (v && typeof v === "object") {
+        return Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, inner]) => [k, walk(inner)]));
+      }
+      return v;
+    };
+    const next = walk(settings[key]);
+    if (missing.length) {
+      delete settings[key];
+      adjustments.push(`dropped the web profile schedule: ${missing.map((n) => `"${n}"`).join(", ")} ${missing.length === 1 ? "is" : "are"} not on the destination`);
+    } else if (changed) {
+      settings[key] = next;
+      adjustments.push("mapped the profiles in the web profile schedule to the destination");
+    }
+  }
 }
 
 /** Setting key holding a web-control policy's Website Management tag rules. */
