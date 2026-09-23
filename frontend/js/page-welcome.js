@@ -1,4 +1,5 @@
 import { api } from "./api.js";
+import { icon, mark } from "./icons.js";
 
 const state = {
   mode: "direct",
@@ -77,7 +78,7 @@ async function testDirect(side) {
     resultEl.innerHTML = `<div class="banner banner-warn">Client ID and secret are required.</div>`;
     return;
   }
-  resultEl.innerHTML = `<div class="banner banner-info">Testing…</div>`;
+  resultEl.innerHTML = `<div class="banner banner-info"><span class="spin"></span> Testing the connection</div>`;
   try {
     const res = await api.post("/api/credentials/test", {
       mode: "direct",
@@ -88,11 +89,11 @@ async function testDirect(side) {
     data.tested = res.identity;
     const labelHint = data.label
       ? ""
-      : `<br/><em>Tip: set a friendly label above (e.g. your company name). The API doesn't expose the tenant name for direct credentials.</em>`;
+      : `<br/><span class="hint">Tip: set a friendly label above, such as the company name. The API does not return the tenant name for tenant credentials.</span>`;
     resultEl.innerHTML = `
       <div class="banner banner-ok">
         Connected to tenant <code>${esc(res.identity.tenantId)}</code>
-        · Region: <code>${esc(res.identity.apiHost)}</code>
+        on <code>${esc(res.identity.apiHost)}</code>
         ${labelHint}
       </div>`;
     // Enable continue
@@ -112,7 +113,7 @@ async function testPartner() {
     resultEl.innerHTML = `<div class="banner banner-warn">Client ID and secret are required.</div>`;
     return;
   }
-  resultEl.innerHTML = `<div class="banner banner-info">Authenticating and loading tenants…</div>`;
+  resultEl.innerHTML = `<div class="banner banner-info"><span class="spin"></span> Signing in and loading tenants</div>`;
   try {
     const res = await api.post("/api/credentials/test", {
       mode: "partner",
@@ -140,7 +141,7 @@ function populateTenantSelectors(tenants) {
   const options = sorted
     .map((t) => `<option value="${escAttr(t.id)}">${esc(t.name)} (${esc(t.dataRegion)})</option>`)
     .join("");
-  const placeholder = `<option value="">— select a tenant —</option>`;
+  const placeholder = `<option value="">Select a tenant</option>`;
   $("#partner-source-select").innerHTML = placeholder + options;
   $("#partner-dest-select").innerHTML = placeholder + options;
 }
@@ -316,3 +317,17 @@ function escAttr(s) { return esc(s).replace(/'/g, "&#39;"); }
 
 wire();
 showStep(1);
+
+// Tool mark, icons in static markup, and the show/hide control on secret fields.
+document.querySelectorAll("[data-mark]").forEach((el) => { el.outerHTML = mark("welcome-mark"); });
+document.querySelectorAll("[data-icon]").forEach((el) => { el.outerHTML = icon(el.dataset.icon); });
+document.querySelectorAll(".reveal-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const input = btn.parentElement.querySelector("input");
+    const show = input.type === "password";
+    input.type = show ? "text" : "password";
+    btn.innerHTML = icon(show ? "eyeOff" : "eye");
+    btn.setAttribute("aria-label", show ? "Hide secret" : "Show secret");
+    btn.title = show ? "Hide secret" : "Show secret";
+  });
+});

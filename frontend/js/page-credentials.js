@@ -1,6 +1,7 @@
 import "./nav.js";
 import { api } from "./api.js";
 import { toast } from "./toast.js";
+import { icon } from "./icons.js";
 
 let currentMode = "direct";
 
@@ -68,7 +69,7 @@ function wireDirectForms() {
       const input = form.clientSecret;
       const btn = form.querySelector(".reveal-btn");
       input.type = input.type === "password" ? "text" : "password";
-      btn.textContent = input.type === "password" ? "Reveal" : "Hide";
+      revealState(btn, input.type !== "password");
     });
 
     form.querySelector(".test-btn").addEventListener("click", async () => {
@@ -151,7 +152,7 @@ function wirePartnerForm() {
     const input = form.clientSecret;
     const btn = form.querySelector(".reveal-btn");
     input.type = input.type === "password" ? "text" : "password";
-    btn.textContent = input.type === "password" ? "Reveal" : "Hide";
+    revealState(btn, input.type !== "password");
   });
 
   document.getElementById("test-partner-btn").addEventListener("click", () => {
@@ -170,7 +171,7 @@ async function loadPartnerTenants(presetSource, presetDest) {
 
   if (!clientId) { setBanner(banner, "warn", "Client ID required."); return; }
   if (!secretChanged) {
-    // Secret hasn't been changed — try to load tenants from the existing
+    // Secret hasn't been changed; try to load tenants from the existing
     // partner context (already authenticated server-side) instead of
     // calling the test endpoint which requires the raw secret.
     setBanner(banner, "info", "Loading tenants from existing session…");
@@ -180,8 +181,8 @@ async function loadPartnerTenants(presetSource, presetDest) {
         setBanner(banner, "ok", `${res.items.length} tenant${res.items.length === 1 ? "" : "s"} loaded from existing session.`);
         const sorted = (res.items || []).sort((a, b) => a.name.localeCompare(b.name));
         const options = sorted.map((t) => `<option value="${escAttr(t.id)}">${esc(t.name)} (${esc(t.dataRegion)})</option>`).join("");
-        document.getElementById("p-source-select").innerHTML = `<option value="">— select —</option>` + options;
-        document.getElementById("p-dest-select").innerHTML = `<option value="">— select —</option>` + options;
+        document.getElementById("p-source-select").innerHTML = `<option value="">Select a tenant</option>` + options;
+        document.getElementById("p-dest-select").innerHTML = `<option value="">Select a tenant</option>` + options;
         if (presetSource) document.getElementById("p-source-select").value = presetSource;
         if (presetDest) document.getElementById("p-dest-select").value = presetDest;
         return;
@@ -200,10 +201,10 @@ async function loadPartnerTenants(presetSource, presetDest) {
       clientSecret,
     });
 
-    setBanner(banner, "ok", `${res.idType} — ${res.tenantCount} tenant${res.tenantCount === 1 ? "" : "s"} loaded.`);
+    setBanner(banner, "ok", `${res.idType} credentials, ${res.tenantCount} tenant${res.tenantCount === 1 ? "" : "s"} loaded.`);
     const sorted = (res.tenants || []).sort((a, b) => a.name.localeCompare(b.name));
     const options = sorted.map((t) => `<option value="${escAttr(t.id)}">${esc(t.name)} (${esc(t.dataRegion)})</option>`).join("");
-    const placeholder = `<option value="">— select —</option>`;
+    const placeholder = `<option value="">Select a tenant</option>`;
     document.getElementById("p-source-select").innerHTML = placeholder + options;
     document.getElementById("p-dest-select").innerHTML = placeholder + options;
 
@@ -261,3 +262,9 @@ function esc(s) {
 function escAttr(s) { return esc(s).replace(/'/g, "&#39;"); }
 
 boot();
+
+function revealState(btn, shown) {
+  btn.innerHTML = icon(shown ? "eyeOff" : "eye");
+  btn.setAttribute("aria-label", shown ? "Hide value" : "Show value");
+  btn.title = shown ? "Hide value" : "Show value";
+}

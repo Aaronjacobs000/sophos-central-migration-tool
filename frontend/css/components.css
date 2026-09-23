@@ -295,6 +295,7 @@ input:disabled { cursor: not-allowed; opacity: 0.5; }
 .cred-form label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-weight: 550; color: var(--ink-3); }
 .cred-form input[type="text"], .cred-form input[type="password"] { font-family: var(--mono); font-size: 13px; height: 38px; }
 .cred-form select { height: 38px; }
+.cred-form input[name="label"], .cred-form input[id$="-label"] { font-family: var(--font); font-size: 13.5px; }
 .cred-form .hint { font-size: 11.5px; font-weight: 400; }
 .input-with-button { position: relative; display: flex; align-items: center; }
 .input-with-button input { flex: 1; min-width: 0; padding-right: 44px; }
@@ -703,7 +704,10 @@ input:disabled { cursor: not-allowed; opacity: 0.5; }
 .welcome-card-body { padding: 28px 32px 30px; }
 .welcome-header h1 { font-size: 22px; letter-spacing: -0.025em; line-height: 1.25; }
 .welcome-header .tagline { margin: 8px 0 0; font-size: 13.5px; color: var(--ink-2); }
-.welcome-header .unofficial { display: inline-flex; margin: 12px 0 0; }
+.unofficial-note { display: flex; gap: 8px; align-items: flex-start; margin: 14px 0 0; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--glass); font-size: 12px; color: var(--ink-3); }
+.unofficial-note::before { content: ""; width: 6px; height: 6px; margin-top: 6px; border-radius: 50%; background: var(--warn); flex: 0 0 auto; }
+.welcome-wordmark { font-size: 19px; font-weight: 700; letter-spacing: -0.025em; color: var(--ink-0); }
+.welcome-card .review-card { background: var(--glass); backdrop-filter: none; -webkit-backdrop-filter: none; box-shadow: none; border-radius: var(--radius-md); }
 .wizard-steps { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; padding: 0; margin: 22px 0 22px; }
 .wizard-steps li { height: 26px; display: inline-flex; align-items: center; padding: 0 11px; border-radius: 999px; border: 1px solid var(--line); background: var(--glass); font-size: 11.5px; font-weight: 600; color: var(--ink-3); }
 .wizard-steps li.done { color: #a8efc3; background: var(--ok-soft); border-color: var(--ok-line); }
@@ -956,3 +960,10 @@ input:disabled { cursor: not-allowed; opacity: 0.5; }
 }
 #job-warnings .banner { margin: 0 0 12px; }
 .plain-form input[type="text"] { font-family: var(--font); font-size: 13.5px; }
+
+/* ================= credentials ================= */
+.mode-picker-row { flex-direction: row; }
+.mode-picker-row .mode-option { flex: 1; }
+.split-row > .cred-card + .cred-card { margin-top: 0; }
+.cred-card h2 { margin-bottom: 14px; }
+.cred-card .banner { margin-top: 12px; }
