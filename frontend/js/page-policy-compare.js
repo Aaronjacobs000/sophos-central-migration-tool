@@ -5,6 +5,7 @@ import {
   summarizeEntries,
   renderCompareSummary,
   renderCompareTable,
+  renderValue,
 } from "./diff-view.js";
 import { toast } from "./toast.js";
 
@@ -49,8 +50,8 @@ async function boot() {
 
 function renderHeader() {
   const lead = state.destPolicy
-    ? `Comparing <strong>${escapeHtml(state.sourcePolicy.name)}</strong> on source vs destination`
-    : `Source policy <strong>${escapeHtml(state.sourcePolicy.name)}</strong> has no matching destination policy`;
+    ? `Comparing <strong>${escapeHtml(state.sourcePolicy.name)}</strong> on the source and the destination.`
+    : `Source policy <strong>${escapeHtml(state.sourcePolicy.name)}</strong> has no matching destination policy.`;
   document.getElementById("page-lead").innerHTML = lead;
 
   const summary = summarizeEntries(state.entries);
@@ -66,15 +67,13 @@ function renderHeader() {
   document.getElementById("header-area").innerHTML = `
     <header class="compare-page-header">
       <div>
-        <h2>${escapeHtml(state.sourcePolicy.name)}</h2>
+        <h2 class="compare-title">${escapeHtml(state.sourcePolicy.name)}</h2>
         <div class="compare-meta-row">
           <code>${escapeHtml(state.sourcePolicy.type)}</code>
-          ${state.destPolicy ? `<span class="hint">matched by name + type</span>` : `<span class="diff-pill diff-pill-add">no destination match</span>`}
+          ${state.destPolicy ? `<span class="hint">Matched by name and type</span>` : `<span class="tag tag-src">No destination match</span>`}
         </div>
       </div>
-      <div class="form-actions" style="margin-top:0; display:flex; align-items:center; gap:0.75rem;">
-        <button id="clone-btn" class="btn btn-primary">${escapeHtml(cloneLabel)}</button>
-      </div>
+      <button id="clone-btn" class="btn btn-primary">${escapeHtml(cloneLabel)}</button>
     </header>
     ${summaryHtml}
     ${metaRows}
@@ -106,38 +105,29 @@ function renderMetadataRows() {
           : "differ"
         : "source-only";
       const pillClass = {
-        match: "compare-pill-match",
-        differ: "compare-pill-differ",
-        "source-only": "compare-pill-source",
+        match: "tag-ok",
+        differ: "tag-warn",
+        "source-only": "tag-src",
       }[status];
       const label = { match: "match", differ: "differs", "source-only": "source only" }[status];
-      const fmt = (v) => {
-        if (v === undefined || v === null) return `<span class="compare-missing">—</span>`;
-        return `<code class="compare-value">${escapeHtml(String(v))}</code>`;
-      };
+      const role = status === "differ";
       return `
         <tr class="compare-row compare-row-${status}">
-          <td class="compare-path">${escapeHtml(f.label)}</td>
-          <td class="compare-cell compare-cell-source">${fmt(sv)}</td>
-          <td class="compare-cell compare-cell-dest">${state.destPolicy ? fmt(dv) : `<span class="compare-missing">—</span>`}</td>
-          <td class="compare-status"><span class="compare-pill ${pillClass}">${label}</span></td>
+          <td class="compare-path"><span class="set-label">${escapeHtml(f.label)}</span></td>
+          <td class="compare-cell">${renderValue(sv ?? undefined, false, role ? "before" : "")}</td>
+          <td class="compare-cell">${state.destPolicy ? renderValue(dv ?? undefined, false, role ? "after" : "") : `<span class="compare-missing">not set</span>`}</td>
+          <td class="compare-status"><span class="tag ${pillClass}">${label}</span></td>
         </tr>`;
     })
     .join("");
 
   return `
-    <section class="compare-group" style="margin-top:1rem;">
-      <header class="compare-group-header">
-        <h3>Policy metadata</h3>
-        <span class="hint">Top-level policy fields</span>
-      </header>
-      <table class="data-table compare-table">
-        <thead>
-          <tr><th>Field</th><th>Source</th><th>Destination</th><th>Status</th></tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </section>
+    <table class="data-table compare-table compare-meta">
+      <thead>
+        <tr><th>Policy field</th><th><span class="side-title">Source</span></th><th><span class="side-title is-dest">Destination</span></th><th>Status</th></tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
   `;
 }
 

@@ -3,21 +3,21 @@
  *
  * The backend already returns the full source and dest objects plus a flat
  * change list. This module ignores the change list and walks the union of
- * leaf paths, producing rows that the UI groups by top-level key.
+ * leaf paths, producing rows that the UI groups by section.
  */
 
 const STATUS_LABEL = {
   match: "match",
   differ: "differs",
   "source-only": "source only",
-  "dest-only": "dest only",
+  "dest-only": "destination only",
 };
 
 const STATUS_PILL_CLASS = {
-  match: "compare-pill-match",
-  differ: "compare-pill-differ",
-  "source-only": "compare-pill-source",
-  "dest-only": "compare-pill-dest",
+  match: "tag-ok",
+  differ: "tag-warn",
+  "source-only": "tag-src",
+  "dest-only": "tag-dst",
 };
 
 /**
@@ -114,137 +114,180 @@ export function summarizeEntries(entries) {
 }
 
 /**
- * Render the summary pills shown above the comparison table.
+ * Render the summary tags shown above the comparison table.
  */
 export function renderCompareSummary(summary) {
+  const part = (n, cls, text) => (n ? `<span class="tag ${cls}">${n} ${text}</span>` : "");
   return `
     <div class="compare-summary">
-      <span class="compare-pill compare-pill-differ">${summary.differ} differ</span>
-      <span class="compare-pill compare-pill-source">${summary["source-only"]} source only</span>
-      <span class="compare-pill compare-pill-dest">${summary["dest-only"]} dest only</span>
-      <span class="compare-pill compare-pill-match">${summary.match} match</span>
-      <span class="hint" style="margin-left:0.5rem;">${summary.total} settings total</span>
+      ${part(summary.differ, "tag-warn", "differ")}
+      ${part(summary["source-only"], "tag-src", "source only")}
+      ${part(summary["dest-only"], "tag-dst", "destination only")}
+      ${part(summary.match, "tag-ok", "match")}
+      <span class="hint">${summary.total} settings in total</span>
     </div>
   `;
 }
 
+// Words that read better in capitals than in sentence case.
+const ACRONYMS = new Map(
+  ["amsi", "tls", "ssl", "url", "urls", "usb", "dlp", "ips", "http", "https", "dns", "ip", "id", "api", "cpu", "mtd", "hmpa", "aap", "edr", "xdr", "mdr", "ntp", "vpn", "os"]
+    .map((w) => [w, w.toUpperCase()]),
+);
+
+function words(slug) {
+  return String(slug)
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((w) => ACRONYMS.get(w.toLowerCase()) ?? w.toLowerCase());
+}
+
+function sentence(slug) {
+  const w = words(slug);
+  if (!w.length) return "";
+  const first = w[0] === w[0].toUpperCase() && w[0].length > 1 ? w[0] : w[0].charAt(0).toUpperCase() + w[0].slice(1);
+  return [first, ...w.slice(1)].join(" ");
+}
+
 /**
- * Render the side-by-side comparison table, grouped by top-level key.
+ * Turn a setting path into a section and a readable label.
+ * ["endpoint.threat-protection.malware-protection.scheduled-scan.time", "value"]
+ *   -> { section: "Malware protection", label: "Scheduled scan time" }
+ * The endpoint.<policy>. prefix is dropped; the raw key stays available.
+ */
+export function describePath(path) {
+  const key = path[0] ?? "";
+  const sub = path.slice(1);
+  if (sub[0] === "value") sub.shift();
+  let segs = key.split(".");
+  if (segs[0] === "endpoint" && segs.length > 2) segs = segs.slice(2);
+  const section = segs.length > 1 ? sentence(segs[0]) : "General";
+  const rest = (segs.length > 1 ? segs.slice(1) : segs).concat(sub);
+  const parts = rest.map((seg) => words(seg).join(" "));
+  // Fold a trailing "enabled" into the part before it: "Deep learning enabled".
+  if (parts.length > 1 && parts[parts.length - 1] === "enabled") {
+    parts[parts.length - 2] += " enabled";
+    parts.pop();
+  }
+  const label = parts.map((p, i) => (i === 0 ? p.charAt(0).toUpperCase() + p.slice(1) : p)).join(" · ");
+  return { section, label: label || section, rawKey: sub.length ? `${key} › ${sub.join(".")}` : key };
+}
+
+/**
+ * Render the side-by-side comparison as one table grouped by section.
  */
 export function renderCompareTable(entries, options = {}) {
   const { showOnlyDiffs = true, filter = "" } = options;
   const filterLower = filter.toLowerCase();
 
-  let filtered = entries;
+  let rows = entries.map((e) => ({ ...e, ...describePath(e.path) }));
   if (showOnlyDiffs) {
-    filtered = filtered.filter((e) => e.status !== "match");
+    rows = rows.filter((e) => e.status !== "match");
   }
   if (filterLower) {
-    filtered = filtered.filter((e) =>
-      e.path.join(".").toLowerCase().includes(filterLower),
+    rows = rows.filter((e) =>
+      e.path.join(".").toLowerCase().includes(filterLower) ||
+      e.label.toLowerCase().includes(filterLower) ||
+      e.section.toLowerCase().includes(filterLower),
     );
   }
 
-  if (filtered.length === 0) {
-    if (showOnlyDiffs && entries.length > 0) {
-      return `<div class="empty-state">No differences. Source and destination match for all ${entries.length} settings.</div>`;
+  if (rows.length === 0) {
+    if (showOnlyDiffs && entries.length > 0 && !filterLower) {
+      return `<div class="empty-state">No differences. Source and destination match on all ${entries.length} settings.</div>`;
     }
     return `<div class="empty-state">No settings match the current filter.</div>`;
   }
 
-  const groups = groupByTopKey(filtered);
-  const sortedKeys = [...groups.keys()].sort();
+  const sections = new Map();
+  for (const r of rows) {
+    if (!sections.has(r.section)) sections.set(r.section, []);
+    sections.get(r.section).push(r);
+  }
+  const sortedSections = [...sections.keys()].sort((a, b) =>
+    a === "General" ? 1 : b === "General" ? -1 : a.localeCompare(b),
+  );
 
-  return sortedKeys
-    .map((key) => renderGroup(key, groups.get(key)))
-    .join("");
-}
-
-function renderGroup(topKey, entries) {
-  const counts = summarizeEntries(entries);
-  const summary = compactSummary(counts);
-
-  const rows = entries
-    .map((e) => {
-      const pathLabel = e.path.slice(1).join(".") || "(value)";
-      const fullPath = e.path.join(".");
-      const sourceCell = renderValue(e.source, e.status === "dest-only");
-      const destCell = renderValue(e.dest, e.status === "source-only");
-      const pillClass = STATUS_PILL_CLASS[e.status];
-      const rowClass = `compare-row compare-row-${e.status}`;
-      return `
-        <tr class="${rowClass}">
-          <td class="compare-path" title="${escapeAttr(fullPath)}">${escapeHtml(pathLabel)}</td>
-          <td class="compare-cell compare-cell-source">${sourceCell}</td>
-          <td class="compare-cell compare-cell-dest">${destCell}</td>
-          <td class="compare-status"><span class="compare-pill ${pillClass}">${escapeHtml(STATUS_LABEL[e.status])}</span></td>
-        </tr>`;
-    })
-    .join("");
+  const bodies = sortedSections.map((name) => {
+    const list = sections.get(name).sort((a, b) => a.label.localeCompare(b.label));
+    const counts = summarizeEntries(list);
+    const body = list.map(renderRow).join("");
+    return `
+      <tbody>
+        <tr class="compare-section"><th colspan="4"><span>${escapeHtml(name)}</span><span class="hint">${escapeHtml(compactSummary(counts))}</span></th></tr>
+        ${body}
+      </tbody>`;
+  }).join("");
 
   return `
-    <section class="compare-group">
-      <header class="compare-group-header">
-        <h3>${escapeHtml(topKey)}</h3>
-        <span class="hint">${escapeHtml(summary)}</span>
-      </header>
-      <table class="data-table compare-table">
-        <thead>
-          <tr>
-            <th>Setting</th>
-            <th>Source</th>
-            <th>Destination</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </section>
-  `;
+    <table class="data-table compare-table">
+      <thead>
+        <tr>
+          <th>Setting</th>
+          <th><span class="side-title">Source</span></th>
+          <th><span class="side-title is-dest">Destination</span></th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      ${bodies}
+    </table>`;
+}
+
+function renderRow(e) {
+  const pillClass = STATUS_PILL_CLASS[e.status];
+  const differ = e.status === "differ";
+  return `
+    <tr class="compare-row compare-row-${e.status}">
+      <td class="compare-path" title="${escapeAttr(e.rawKey)}">
+        <span class="set-label">${escapeHtml(e.label)}</span>
+        <code class="set-key">${escapeHtml(e.rawKey)}</code>
+      </td>
+      <td class="compare-cell">${renderValue(e.source, e.status === "dest-only", differ ? "before" : "")}</td>
+      <td class="compare-cell">${renderValue(e.dest, e.status === "source-only", differ ? "after" : "")}</td>
+      <td class="compare-status"><span class="tag ${pillClass}">${escapeHtml(STATUS_LABEL[e.status])}</span></td>
+    </tr>`;
 }
 
 function compactSummary(counts) {
   const parts = [];
   if (counts.differ) parts.push(`${counts.differ} differ`);
   if (counts["source-only"]) parts.push(`${counts["source-only"]} source only`);
-  if (counts["dest-only"]) parts.push(`${counts["dest-only"]} dest only`);
+  if (counts["dest-only"]) parts.push(`${counts["dest-only"]} destination only`);
   if (counts.match) parts.push(`${counts.match} match`);
   return parts.join(" · ") || `${counts.total} settings`;
 }
 
-function renderValue(v, missing) {
+export function renderValue(v, missing, role = "") {
+  const cls = role ? ` chip-${role}` : "";
   if (missing || v === undefined) {
-    return `<span class="compare-missing">—</span>`;
+    return `<span class="compare-missing">not set</span>`;
   }
   if (v === null) {
-    return `<code class="compare-value">null</code>`;
+    return `<span class="chip${cls}">null</span>`;
   }
   if (typeof v === "boolean") {
-    const cls = v ? "compare-bool-true" : "compare-bool-false";
-    return `<code class="compare-value ${cls}">${v}</code>`;
+    return `<span class="chip chip-bool chip-${v ? "on" : "off"}${cls}">${v ? "On" : "Off"}</span>`;
   }
   if (typeof v === "number") {
-    return `<code class="compare-value">${v}</code>`;
+    return `<span class="chip${cls} tnum">${v}</span>`;
   }
   if (typeof v === "string") {
-    if (!v) return `<code class="compare-value compare-empty">""</code>`;
-    return `<code class="compare-value">${escapeHtml(v)}</code>`;
+    if (!v) return `<span class="chip chip-empty${cls}">empty</span>`;
+    return `<span class="chip${cls}">${escapeHtml(v)}</span>`;
   }
   if (Array.isArray(v)) {
-    if (v.length === 0) return `<code class="compare-value compare-empty">[]</code>`;
+    if (v.length === 0) return `<span class="chip chip-empty${cls}">none</span>`;
     if (v.every((x) => x === null || typeof x !== "object")) {
-      return `<code class="compare-value">[${v.map((x) => formatPrimitive(x)).join(", ")}]</code>`;
+      return v.map((x) => `<span class="chip${cls}">${formatPrimitive(x)}</span>`).join(" ");
     }
-    return `<code class="compare-value compare-collapsible" title="${escapeAttr(JSON.stringify(v, null, 2))}">[${v.length} items]</code>`;
+    return `<span class="chip compare-collapsible${cls}" title="${escapeAttr(JSON.stringify(v, null, 2))}">${v.length} items</span>`;
   }
-  // object fallback (shouldn't happen — we recurse into objects)
-  return `<code class="compare-value compare-collapsible" title="${escapeAttr(JSON.stringify(v, null, 2))}">{${Object.keys(v).length} keys}</code>`;
+  return `<span class="chip compare-collapsible${cls}" title="${escapeAttr(JSON.stringify(v, null, 2))}">${Object.keys(v).length} keys</span>`;
 }
 
 function formatPrimitive(v) {
   if (v === null) return "null";
-  if (typeof v === "string") return `"${escapeHtml(v)}"`;
-  return String(v);
+  return escapeHtml(String(v));
 }
 
 function escapeHtml(s) {
