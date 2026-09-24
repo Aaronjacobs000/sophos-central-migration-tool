@@ -21,7 +21,7 @@
 :root {
   color-scheme: dark;
 
-  /* The accent. Recommended: aqua. Alternative rendered for review: iris #a594ff. */
+  /* The accent: aqua, chosen 24/09/2026. */
   --accent: #5ee0d0;
 
   --accent-hi: color-mix(in oklab, var(--accent) 70%, white);
