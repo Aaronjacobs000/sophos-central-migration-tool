@@ -363,8 +363,9 @@ input:disabled { cursor: not-allowed; opacity: 0.5; }
 .data-table .col-actions { width: 1%; white-space: nowrap; text-align: right; }
 .data-table a { color: var(--ink-1); font-weight: 550; }
 .data-table a:hover { color: var(--accent-text); }
-.data-table tr.is-dim td { opacity: 0.48; }
-.data-table tr.is-dim:hover td { opacity: 0.85; }
+/* The actions cell stays at full strength so its menu is not faded. */
+.data-table tr.is-dim td:not(.col-actions) { opacity: 0.48; }
+.data-table tr.is-dim:hover td:not(.col-actions) { opacity: 0.85; }
 .cell-nowrap { white-space: nowrap; }
 .cell-truncate { max-width: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
