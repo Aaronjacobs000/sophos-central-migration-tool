@@ -265,7 +265,7 @@ compareRouter.get("/compare/policies/deep", async (req, res, next) => {
   }
 });
 
-async function computeDeepMatch(): Promise<DeepPolicyMatchResult> {
+export async function computeDeepMatch(): Promise<DeepPolicyMatchResult> {
   const startedAt = Date.now();
   const src = requireContext("source");
   const dst = requireContext("dest");
@@ -324,15 +324,15 @@ async function computeDeepMatch(): Promise<DeepPolicyMatchResult> {
         srcFull.settings ?? {},
         dstFull.settings ?? {},
       );
+      // Priority is left out: a clone lands at the bottom of the
+      // destination's order, so its priority differs by design.
       const metaChanges = diff(
         {
           enabled: srcFull.enabled,
-          priority: srcFull.priority,
           enforced: srcFull.enforced,
         },
         {
           enabled: dstFull.enabled,
-          priority: dstFull.priority,
           enforced: dstFull.enforced,
         },
       );
