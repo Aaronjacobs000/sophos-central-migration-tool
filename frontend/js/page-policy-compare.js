@@ -157,7 +157,7 @@ function wireToolbar() {
 async function cloneToDest() {
   const verb = state.destPolicy
     ? "overwrite the destination policy with source"
-    : "clone this policy to destination";
+    : "clone this policy to the bottom of the destination's priority order";
   if (!confirm(`Are you sure you want to ${verb}?`)) return;
   try {
     const res = await api.post("/api/migrate/policies", {

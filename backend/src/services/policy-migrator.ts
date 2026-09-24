@@ -9,6 +9,10 @@
  * 500 "Error processing data"; GET returns the block fine). Use the Policies
  * page "Export assignments (CSV)" to capture them for manual re-assignment.
  *
+ * A clone goes to the bottom of the destination's priority order, just
+ * above the base policy, whatever its priority on the source; an overwrite
+ * leaves the destination policy where it is.
+ *
  * Web control policies name their web filtering profile by ID. The source
  * tenant's IDs mean nothing on the destination, so the ID is mapped to the
  * destination profile with the same name, or the setting is dropped and
@@ -82,36 +86,51 @@ export async function migratePolicies(
       };
     })());
 
-  const results: MigratePolicyResult[] = [];
-
+  // Read every source policy first so a batch can be written from the top
+  // of the source order down: each create asks for the bottom, so a later
+  // create lands beneath an earlier one and the batch keeps its source order.
+  // Results still come back in request order.
+  const fetched: Array<SophosPolicy | Error> = [];
   for (const sourceId of req.policyIds) {
-    let sourcePolicy: SophosPolicy;
     try {
-      sourcePolicy = await getPolicy(src.client, src.tenantId, sourceId);
+      fetched.push(await getPolicy(src.client, src.tenantId, sourceId));
     } catch (err) {
-      results.push({
+      fetched.push(err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+  const priorityOf = (p: SophosPolicy | Error) => (p instanceof Error ? 0 : p.priority ?? 0);
+  const order = req.policyIds.map((_, i) => i).sort((a, b) => priorityOf(fetched[b]!) - priorityOf(fetched[a]!));
+
+  const results: MigratePolicyResult[] = new Array(req.policyIds.length);
+
+  for (const i of order) {
+    const sourceId = req.policyIds[i]!;
+    const got = fetched[i]!;
+    if (got instanceof Error) {
+      results[i] = {
         sourceId,
         sourceName: "(unknown)",
         ok: false,
         action: "create",
-        error: errMsg(err),
-      });
+        error: got.message,
+      };
       continue;
     }
+    const sourcePolicy = got;
 
     const match = destExisting.find(
       (p) => p.name === sourcePolicy.name && p.type === sourcePolicy.type,
     );
 
     if (match && !req.overwrite) {
-      results.push({
+      results[i] = {
         sourceId,
         sourceName: sourcePolicy.name,
         destId: match.id,
         destName: match.name,
         ok: true,
         action: "skip-exists",
-      });
+      };
       continue;
     }
 
@@ -119,7 +138,7 @@ export async function migratePolicies(
       name: sourcePolicy.name,
       type: sourcePolicy.type,
       enabled: sourcePolicy.enabled,
-      priority: sourcePolicy.priority,
+      ...(match ? {} : { priority: BOTTOM_PRIORITY }),
       enforced: sourcePolicy.enforced,
       settings: sanitizeSettings(sourcePolicy.settings),
     };
@@ -155,7 +174,7 @@ export async function migratePolicies(
     await remapWebProfiles(body.settings, webProfiles, adjustments);
 
     if (req.dryRun) {
-      results.push({
+      results[i] = {
         sourceId,
         sourceName: sourcePolicy.name,
         destId: match?.id,
@@ -163,7 +182,7 @@ export async function migratePolicies(
         ok: true,
         action: match ? "dry-run-overwrite" : "dry-run-create",
         adjustments: adjustments.length ? adjustments : undefined,
-      });
+      };
       continue;
     }
 
@@ -209,7 +228,7 @@ export async function migratePolicies(
           ...(adjustments.length ? { adjustments } : {}),
         },
       });
-      results.push({
+      results[i] = {
         sourceId,
         sourceName: sourcePolicy.name,
         destId: result.id,
@@ -217,7 +236,7 @@ export async function migratePolicies(
         ok: true,
         action: match ? "overwrite" : "create",
         adjustments: adjustments.length ? adjustments : undefined,
-      });
+      };
     } catch (err) {
       const msg = errMsg(err);
       await audit({
@@ -235,7 +254,7 @@ export async function migratePolicies(
           ...(adjustments.length ? { adjustments } : {}),
         },
       });
-      results.push({
+      results[i] = {
         sourceId,
         sourceName: sourcePolicy.name,
         destId: match?.id,
@@ -244,7 +263,7 @@ export async function migratePolicies(
         action: match ? "overwrite" : "create",
         error: msg,
         adjustments: adjustments.length ? adjustments : undefined,
-      });
+      };
     }
   }
 
@@ -340,6 +359,16 @@ export async function remapWebProfiles(
     }
   }
 }
+
+/**
+ * Priorities count up from the base policy (0), and a larger number wins:
+ * a policy created without one gets the next number up, which the API docs
+ * call the highest priority. Asking for 1 puts the new policy at the bottom,
+ * just above the base policy, and the API moves the existing policies of
+ * that type up by one, keeping their order. Both measured on a live tenant
+ * on 24/09/2026; deleting the clone moves them back down.
+ */
+const BOTTOM_PRIORITY = 1;
 
 /** Setting key holding a web-control policy's Website Management tag rules. */
 const WEB_TAGS_SETTING = "endpoint.web-control.tags.settings";

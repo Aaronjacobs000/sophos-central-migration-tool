@@ -26,7 +26,7 @@ A first-run wizard walks through either mode, tests the connection before saving
 
 Endpoint policies are grouped by product, source on the left and destination on the right. A deep match reads the full settings of every policy that exists on both sides, and each product shows a small bar of how many policies match, differ, or exist on one side only. You can hide products where everything matches.
 
-Compare opens one table of settings grouped by section, with readable labels (the raw setting key shows when you hover a row). Clone copies a source-only policy to the destination, and Compare offers to overwrite a destination policy with the source version. Destination policies can be deleted from a row menu after a double confirmation.
+Compare opens one table of settings grouped by section, with readable labels (the raw setting key shows when you hover a row). Clone copies a source-only policy to the bottom of the destination's priority order, just above the base policy, and Compare offers to overwrite a destination policy with the source version. Destination policies can be deleted from a row menu after a double confirmation.
 
 Policy assignments cannot be migrated because the public API rejects every `appliesTo` write. Export assignments (CSV) lists them so you can reassign them by hand.
 

@@ -476,7 +476,7 @@ function wireRows() {
   document.querySelectorAll("[data-clone]").forEach((btn) => {
     btn.addEventListener("click", async (e) => {
       const id = e.currentTarget.dataset.clone;
-      if (!confirm("Clone this policy to destination?")) return;
+      if (!confirm("Clone this policy to destination?\n\nIt goes to the bottom of the destination's priority order, above the base policy.")) return;
       try {
         const res = await api.post("/api/migrate/policies", {
           policyIds: [id],
@@ -534,7 +534,7 @@ function wireBasket() {
   document.getElementById("basket-clone").addEventListener("click", async () => {
     const ids = Array.from(state.selectedSource);
     if (ids.length === 0) return;
-    if (!confirm(`Clone ${ids.length} polic${ids.length === 1 ? "y" : "ies"} from source to destination?`)) return;
+    if (!confirm(`Clone ${ids.length} polic${ids.length === 1 ? "y" : "ies"} from source to destination?\n\nClones go to the bottom of the destination's priority order, above the base policy, in their source order.`)) return;
     try {
       const res = await api.post("/api/migrate/policies", {
         policyIds: ids,
