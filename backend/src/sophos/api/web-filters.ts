@@ -63,8 +63,26 @@ export async function createSiteList(
   return client.tenantRequest<SophosSiteList>(tenantId, SITE_LISTS_PATH, { method: "POST", body });
 }
 
+/** The API refuses (409) while a profile still uses the list. */
+export async function deleteSiteList(
+  client: SophosClient,
+  tenantId: string,
+  id: string,
+): Promise<{ deleted?: boolean }> {
+  return client.tenantRequest(tenantId, `${SITE_LISTS_PATH}/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
 export const listProfiles = (c: SophosClient, t: string) =>
   listAllPages<SophosWebProfile>(c, t, PROFILES_PATH);
+
+/** The API refuses (409) while a policy still uses the profile. */
+export async function deleteProfile(
+  client: SophosClient,
+  tenantId: string,
+  id: string,
+): Promise<{ deleted?: boolean }> {
+  return client.tenantRequest(tenantId, `${PROFILES_PATH}/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
 
 export async function getProfile(
   client: SophosClient,

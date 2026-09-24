@@ -89,6 +89,8 @@ const OUTCOME = {
   failed: `<span class="tag tag-bad">failed</span>`,
   added: `<span class="tag tag-ok">added</span>`,
   "would-add": `<span class="tag tag-accent">would add</span>`,
+  deleted: `<span class="tag tag-ok">deleted</span>`,
+  "would-delete": `<span class="tag tag-accent">would delete</span>`,
   waiting: `<span class="tag tag-muted">waiting</span>`,
 };
 

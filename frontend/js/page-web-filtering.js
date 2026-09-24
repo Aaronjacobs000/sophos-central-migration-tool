@@ -2,7 +2,7 @@ import "./nav.js";
 import { api } from "./api.js";
 import { toast } from "./toast.js";
 import { makeSortable } from "./sortable.js";
-import { esc, escAttr, plural, resultsModal, outcomeOf } from "./ui.js";
+import { esc, escAttr, plural, resultsModal, outcomeOf, rowMenu, wireRowMenus } from "./ui.js";
 
 const TABS = {
   "site-lists": { label: "site list", path: "site-lists", param: "siteListIds" },
@@ -77,16 +77,27 @@ function renderTable(side) {
       : `<td><span class="cell-name">${esc(it.name)}</span>${it.description ? `<div class="hint">${esc(it.description)}</div>` : ""}</td>
          <td class="tnum">${(it.consumers || []).length}</td>
          <td><span class="hint">${it.updatedAt ? new Date(it.updatedAt).toLocaleDateString() : ""}</span></td>`;
-    return `<tr${cls ? ` class="${cls}"` : ""}${onBoth ? ' title="A list or profile with this name exists on both sides"' : ""}>${cb}${cells}</tr>`;
+    const menu = side === "dest"
+      ? `<td class="col-actions">${rowMenu([
+          { label: "Delete from destination", icon: "trash", danger: true, attrs: `data-delete-id="${escAttr(it.id)}" data-name="${escAttr(it.name)}"` },
+        ])}</td>`
+      : "";
+    return `<tr${cls ? ` class="${cls}"` : ""}${onBoth ? ' title="A list or profile with this name exists on both sides"' : ""}>${cb}${cells}${menu}</tr>`;
   }).join("");
 
   const head = tab === "site-lists" ? "<th>Name</th><th>Sites</th><th>Used by</th>" : "<th>Name</th><th>Policies</th><th>Updated</th>";
   target.innerHTML = `
     <table class="data-table">
-      <thead><tr>${side === "source" ? `<th class="col-check"></th>` : ""}${head}</tr></thead>
+      <thead><tr>${side === "source" ? `<th class="col-check"></th>` : ""}${head}${side === "dest" ? `<th class="col-actions"></th>` : ""}</tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
   makeSortable(target);
+  if (side === "dest") {
+    wireRowMenus(target);
+    target.querySelectorAll("[data-delete-id]").forEach((btn) => {
+      btn.addEventListener("click", (e) => deleteFromDest(tab, e.currentTarget.dataset.deleteId, e.currentTarget.dataset.name));
+    });
+  }
   if (side === "source") {
     target.querySelectorAll("input[data-key]").forEach((cb) => {
       cb.addEventListener("change", (e) => {
@@ -170,6 +181,45 @@ function wireBasket() {
     } catch (err) {
       toast(err.message || "Copy failed", "err");
     }
+  });
+}
+
+/** Preview the delete first: a list or profile still in use is refused before anything is sent. */
+async function deleteFromDest(tab, id, name) {
+  const body = { [TABS[tab].param]: [id] };
+  const noun = TABS[tab].label;
+  try {
+    const preview = (await api.post("/api/dest/web-filters/delete", { ...body, dryRun: true })).results ?? [];
+    if (preview.some((r) => !r.ok)) {
+      showDeleteResults(preview, true);
+      return;
+    }
+    if (!confirm(`Delete the destination ${noun} "${name}"?\n\nThis action is irreversible.`)) return;
+    if (!confirm(`Are you absolutely sure? "${name}" will be permanently removed from the destination tenant.`)) return;
+    const results = (await api.post("/api/dest/web-filters/delete", body)).results ?? [];
+    const failed = results.filter((r) => !r.ok).length;
+    if (failed) showDeleteResults(results, false);
+    else toast(`Deleted "${name}" from destination.`, "ok");
+    await Promise.all(Object.keys(TABS).map((t) => load(t, "dest")));
+    renderActive();
+  } catch (err) {
+    toast(err.message || "Delete failed", "err");
+  }
+}
+
+function showDeleteResults(results, dryRun) {
+  const deleteRow = (r) => ({
+    outcome: !r.ok ? "failed" : r.action === "dry-run-delete" ? "would-delete" : "deleted",
+    text: r.name,
+    error: r.error,
+  });
+  resultsModal({
+    title: dryRun ? "Preview: nothing was deleted" : "Delete results",
+    summary: dryRun ? "The destination refuses to delete an item that is still in use." : "Each delete is in data/audit.log.",
+    groups: [
+      { title: "Profiles", rows: results.filter((r) => r.kind === "profile").map(deleteRow) },
+      { title: "Site lists", rows: results.filter((r) => r.kind === "site-list").map(deleteRow) },
+    ],
   });
 }
 
