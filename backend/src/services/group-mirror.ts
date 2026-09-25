@@ -69,9 +69,12 @@ export async function mirrorGroups(req: MirrorGroupsRequest): Promise<MirrorGrou
     }
 
     try {
+      // The create API rejects an empty description with 400 "Validation
+      // failure" (measured 25/09/2026), and GET returns "" for groups made
+      // without one, so only send a description that has text.
       const created = await createGroup(dst.client, dst.tenantId, {
         name: sourceGroup.name,
-        description: sourceGroup.description,
+        ...(sourceGroup.description?.trim() ? { description: sourceGroup.description } : {}),
         type: sourceGroup.type,
         endpointType: sourceGroup.endpointType,
       });
