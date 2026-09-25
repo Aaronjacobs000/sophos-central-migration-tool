@@ -189,9 +189,11 @@ export async function migratePolicies(
     try {
       let result: SophosPolicy;
       // The write API rejects some settings the GET happily returns. When the
-      // error names the offending setting ("… for setting (X)"), drop just
-      // that setting and retry so one bad setting doesn't sink the policy.
-      // Every drop is recorded in `adjustments`.
+      // error names the offending settings ("… for setting (X)"), drop just
+      // those settings and retry so they don't sink the policy. One error can
+      // name many settings (ten web control file types that read back as
+      // "inherit", measured 25/09/2026), so every named setting is dropped at
+      // once. Every drop is recorded in `adjustments`.
       for (let attempt = 0; ; attempt++) {
         try {
           result = match
@@ -200,15 +202,14 @@ export async function migratePolicies(
           break;
         } catch (err) {
           const msg = errMsg(err);
-          const settingKey = /for setting \(([^)]+)\)/.exec(msg)?.[1];
-          if (
-            attempt < MAX_SETTING_RETRIES &&
-            settingKey &&
-            body.settings &&
-            settingKey in body.settings
-          ) {
-            delete body.settings[settingKey];
-            adjustments.push(`dropped setting ${settingKey}: destination rejected it (${msg})`);
+          const named = rejectedSettings(msg).filter(
+            ({ key }) => body.settings !== undefined && key in body.settings,
+          );
+          if (attempt < MAX_SETTING_RETRIES && named.length > 0) {
+            for (const { key, reason } of named) {
+              delete body.settings![key];
+              adjustments.push(`dropped setting ${key}: destination rejected it (${reason})`);
+            }
             continue;
           }
           throw err;
@@ -375,6 +376,20 @@ const WEB_TAGS_SETTING = "endpoint.web-control.tags.settings";
 
 /** Max drop-and-retry attempts when the destination rejects named settings. */
 const MAX_SETTING_RETRIES = 5;
+
+/**
+ * The settings a write error names, each with the sentence that names it,
+ * e.g. "Must provide an allowed value for setting (X)". Each key once.
+ */
+export function rejectedSettings(message: string): Array<{ key: string; reason: string }> {
+  const out: Array<{ key: string; reason: string }> = [];
+  for (const m of message.matchAll(/([^.()]*for setting \(([^)]+)\))/g)) {
+    const key = m[2]!;
+    if (out.some((x) => x.key === key)) continue;
+    out.push({ key, reason: m[1]!.replace(/^.*? - /, "").trim() });
+  }
+  return out;
+}
 
 /**
  * The policy GET shape is not write-safe verbatim: settings may carry a
