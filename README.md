@@ -53,7 +53,8 @@ Eight global lists copy with the same duplicate check: scanning exclusions, allo
 - A dry run shows the calls the real run would make, and the groups the selected devices are in.
 - The job page follows both sides through a server-sent event stream, with a progress bar and a row per device.
 - The Migrations page merges jobs from both tenants' APIs with the ones started here, so moves started in the Sophos Fusion console or from another workstation show too.
-- Jobs are kept in `data/migration-jobs.json`, so a job page still opens after a browser refresh or a server restart. Cancel asks both tenants to delete the job. The migrations API documents no delete and answered 404 on 25/09/2026, so a job is marked cancelled only when a tenant confirms the delete, and a move that has started carries on.
+- Jobs are kept in `data/migration-jobs.json`, so a job page still opens after a browser refresh or a server restart.
+- A started migration can't be cancelled. The Sophos migrations API has no cancel or delete (DELETE answered 404 on 25/09/2026), so the tool has no Cancel button. A receiving job that the sending tenant never picks up stays listed until it expires, 14 days after it was created.
 
 ### Around the tool
 
@@ -154,7 +155,7 @@ data/                            # Created at run time, not committed
 - The API never returns secrets. The credentials page shows masked values.
 - Copies and migrations can be run as a dry run first, which returns what would be created or changed without touching the destination.
 - Copies, clones and migrations are recorded in `data/audit.log` with a timestamp, ID, side, tenant ID, resource and result.
-- Deleting a policy, group or exclusion asks for confirmation twice. Overwriting a policy and cancelling a migration ask once.
+- Deleting a policy, group or exclusion asks for confirmation twice. Overwriting a policy asks once.
 
 ## Credits
 

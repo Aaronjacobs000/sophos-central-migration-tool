@@ -26,8 +26,10 @@
         <span id="job-status"></span>
         <span class="spacer"></span>
         <button id="refresh-btn" class="btn btn-small"><span data-icon="refresh"></span>Refresh now</button>
-        <button id="cancel-btn" class="btn btn-small btn-danger">Cancel migration</button>
       </div>
+      <p class="card-sub" id="no-cancel-note">A started migration can't be cancelled. The Sophos migrations API has no
+        cancel or delete, so the move runs to the end. A receiving job that the sending tenant never picks up stays
+        listed until it expires, 14 days after it was created.</p>
       <div id="job-progress"></div>
       <div id="job-meta"></div>
     </section>

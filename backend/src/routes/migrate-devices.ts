@@ -5,7 +5,6 @@
  *   GET    /api/migrate/devices/jobs/all                 merged local + API jobs
  *   GET    /api/migrate/devices/jobs/:id                 single job detail
  *   GET    /api/migrate/devices/jobs/:id/stream          SSE live updates
- *   DELETE /api/migrate/devices/jobs/:id                 cancel + purge
  *   POST   /api/migrate/devices/jobs/:id/group-membership  put moved devices
  *          back into same-named groups (dryRun supported)
  */
@@ -15,8 +14,6 @@ import { requireConfigured } from "../middleware/require-configured.js";
 import {
   startMigration,
   pollJob,
-  cancelJob,
-  purgeJob,
 } from "../services/device-migrator.js";
 import { listJobs, getJob } from "../services/migration-store.js";
 import { restoreGroupMembership, JobNotFoundError } from "../services/group-membership.js";
@@ -159,18 +156,6 @@ migrateDevicesRouter.get("/migrate/devices/jobs/:id", async (req, res, next) => 
     // Refresh once on detail load so the cached snapshot is up-to-date.
     const updated = await pollJob(req.params.id!).catch(() => job);
     res.json(updated ?? job);
-  } catch (err) {
-    next(err);
-  }
-});
-
-migrateDevicesRouter.delete("/migrate/devices/jobs/:id", async (req, res, next) => {
-  try {
-    await cancelJob(req.params.id!);
-    if (req.query?.purge === "true") {
-      await purgeJob(req.params.id!);
-    }
-    res.json({ ok: true });
   } catch (err) {
     next(err);
   }

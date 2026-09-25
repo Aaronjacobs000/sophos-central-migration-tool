@@ -1,13 +1,15 @@
-// Device moves: both tenants must allow migration, and cancel reports what Sophos did.
+// Device moves: both tenants must allow migration, and there is no cancel, because Sophos has none.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createFakeSophos, SRC, DST } from "./helpers/fake-sophos.mjs";
-import { bootApp, readAudit } from "./helpers/app.mjs";
+import { readFile } from "node:fs/promises";
+import { bootApp } from "./helpers/app.mjs";
 
 const fake = createFakeSophos();
-const { root } = await bootApp(fake);
-const { startMigration, cancelJob } = await import("../backend/dist/services/device-migrator.js");
-const { getJob } = await import("../backend/dist/services/migration-store.js");
+await bootApp(fake);
+const migrator = await import("../backend/dist/services/device-migrator.js");
+const { startMigration } = migrator;
+const { migrateDevicesRouter } = await import("../backend/dist/routes/migrate-devices.js");
 
 const DEVICE = "00000000-0000-4000-8000-000000000001";
 const recent = new Date(Date.now() - 60e3).toISOString();
@@ -52,23 +54,18 @@ test("with both tenants open the receiver job and the sender trigger are sent", 
   assert.deepEqual(migrationWrites().map((w) => `${w.tenant} ${w.method}`), ["dst POST", "src PUT"]);
 });
 
-test("cancel does not mark the job cancelled when both deletes are refused, and audits the refusal", async () => {
-  fake.reset();
-  const { job } = await startMigration({ jobName: "cancel me", endpointIds: [DEVICE] });
-  // As the live API answered on 25/09/2026: no delete route.
-  for (const t of [SRC, DST]) fake.on(t, "DELETE", "/endpoint/v1/migrations/job-1", () => ({ status: 404, body: { error: "NotFound" } }));
-  const before = (await readAudit(root)).length;
-  await assert.rejects(cancelJob(job.localJobId), /Sophos did not cancel the job/);
-  assert.equal((await getJob(job.localJobId)).status, "in-progress");
-  const entries = (await readAudit(root)).slice(before);
-  assert.deepEqual(entries.map((e) => [e.resource, e.ok]), [["migration-sender", false], ["migration-receiver", false]]);
-  assert.ok(entries.every((e) => /404/.test(e.error)));
+test("no route or service can cancel or delete a job", () => {
+  // The migrations API has no cancel or delete (DELETE answered 404 on 25/09/2026).
+  const routes = migrateDevicesRouter.stack.filter((l) => l.route).map((l) => Object.keys(l.route.methods).map((m) => `${m} ${l.route.path}`)).flat();
+  assert.ok(routes.includes("post /migrate/devices"), "the router is the real one");
+  assert.deepEqual(routes.filter((r) => r.startsWith("delete")), []);
+  assert.equal(migrator.cancelJob, undefined);
 });
 
-test("cancel marks the job cancelled when a tenant confirms the delete", async () => {
-  fake.reset();
-  const { job } = await startMigration({ jobName: "cancel me too", endpointIds: [DEVICE] });
-  fake.on(DST, "DELETE", "/endpoint/v1/migrations/job-1", () => ({ status: 204 }));
-  await cancelJob(job.localJobId);
-  assert.equal((await getJob(job.localJobId)).status, "cancelled");
+test("the job page has no Cancel button and says a move can't be cancelled", async () => {
+  const html = await readFile(new URL("../frontend/migrate-job-detail.html", import.meta.url), "utf8");
+  const js = await readFile(new URL("../frontend/js/page-migrate-job-detail.js", import.meta.url), "utf8");
+  assert.doesNotMatch(html, /cancel-btn|Cancel migration/);
+  assert.match(html, /can't be cancelled/);
+  assert.doesNotMatch(js, /api\.del\(|cancel-btn/);
 });

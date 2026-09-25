@@ -16,7 +16,6 @@ async function boot() {
     return;
   }
 
-  document.getElementById("cancel-btn").addEventListener("click", () => cancelJob(id));
   document.getElementById("refresh-btn").addEventListener("click", () => manualRefresh(id));
   document.getElementById("membership-preview").addEventListener("click", () => loadMembership(id, true));
   document.getElementById("membership-apply").addEventListener("click", () => applyMembership(id));
@@ -301,16 +300,6 @@ function renderEndpoints(job) {
       <thead><tr><th>Device</th><th><span class="side-title">Source</span></th><th><span class="side-title is-dest">Destination</span></th><th>Errors</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
-}
-
-async function cancelJob(id) {
-  if (!confirm("Cancel this migration?\n\nThe tool asks both tenants to delete the job. The Sophos migrations API has no cancel operation, so this can be refused, and a move that has started carries on.")) return;
-  try {
-    await api.del(`/api/migrate/devices/jobs/${encodeURIComponent(id)}`);
-    toast("Migration cancelled.", "info");
-  } catch (err) {
-    toast(err.message || "Cancel failed", "err");
-  }
 }
 
 function formatElapsed(since) {
