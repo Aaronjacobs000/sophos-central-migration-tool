@@ -92,24 +92,29 @@ function renderMetadataRows() {
   const dst = state.destPolicy ?? {};
   const fields = [
     { key: "enabled", label: "Enabled" },
-    { key: "priority", label: "Priority" },
+    // Not compared: a clone goes to the bottom of the destination's order,
+    // so its priority differs by design (the deep match skips it too).
+    { key: "priority", label: "Priority", compare: false },
     { key: "enforced", label: "Enforced" },
   ];
   const rows = fields
     .map((f) => {
       const sv = src[f.key];
       const dv = dst[f.key];
-      const status = state.destPolicy
-        ? sv === dv
-          ? "match"
-          : "differ"
-        : "source-only";
+      const status = !state.destPolicy
+        ? "source-only"
+        : f.compare === false
+          ? "not-compared"
+          : sv === dv
+            ? "match"
+            : "differ";
       const pillClass = {
         match: "tag-ok",
         differ: "tag-warn",
         "source-only": "tag-src",
+        "not-compared": "tag-muted",
       }[status];
-      const label = { match: "match", differ: "differs", "source-only": "source only" }[status];
+      const label = { match: "match", differ: "differs", "source-only": "source only", "not-compared": "not compared" }[status];
       const role = status === "differ";
       return `
         <tr class="compare-row compare-row-${status}">
