@@ -132,6 +132,11 @@ function wireUI() {
   });
   document.getElementById("select-all-source").addEventListener("click", () => selectAll("source"));
   document.getElementById("select-all-dest").addEventListener("click", () => selectAll("dest"));
+  // The table is the preload cache, which a device move does not update: a
+  // moved device only shows on the receiving side after a reload.
+  for (const side of ["source", "dest"]) {
+    document.getElementById(`refresh-${side}`).addEventListener("click", (e) => reloadSide(side, e.currentTarget));
+  }
   document.getElementById("basket-clear").addEventListener("click", () => {
     state.selected.clear();
     renderTable("source");
@@ -139,6 +144,19 @@ function wireUI() {
     renderBasket();
   });
   document.getElementById("basket-migrate").addEventListener("click", startMigrate);
+}
+
+async function reloadSide(side, btn) {
+  btn.disabled = true;
+  document.getElementById(`table-${side}`).innerHTML = `<div class="empty-state">Reloading…</div>`;
+  try {
+    await refreshSection(side, "endpoints");
+  } catch (err) {
+    toast(err.message || "Reload failed", "err");
+  } finally {
+    await loadSide(side);
+    btn.disabled = false;
+  }
 }
 
 function selectAll(side) {
