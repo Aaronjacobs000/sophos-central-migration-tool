@@ -48,6 +48,10 @@ migrateDevicesRouter.post("/migrate/devices", async (req, res, next) => {
       direction,
       dryRun,
     });
+    if (result.settingFailure) {
+      res.status(400).json({ error: "migration_not_allowed", message: result.settingFailure });
+      return;
+    }
     if (result.preflightFailures.length > 0) {
       res.status(400).json({
         error: "preflight_failed",

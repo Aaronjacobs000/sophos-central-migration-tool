@@ -33,6 +33,7 @@ import {
   type LocalMigrationJob,
 } from "./migration-store.js";
 import { audit } from "./audit-log.js";
+import { checkMigrationWindow } from "./migration-window.js";
 import { log } from "../log.js";
 import type { SophosEndpoint } from "../sophos/types/sophos.js";
 
@@ -56,6 +57,13 @@ export interface PreflightFailure {
 
 export interface StartMigrationResult {
   preflightFailures: PreflightFailure[];
+  /**
+   * Set when either tenant has Device Migration turned off or expired. Both
+   * tenants must allow it, and a receiving tenant accepts a receiver job
+   * whatever the sending tenant's setting (measured 25/09/2026), leaving a
+   * job the API cannot delete, so nothing is created.
+   */
+  settingFailure?: string;
   /** Present in dry-run mode: the plan we would execute. */
   plan?: {
     sourceTenantId: string;
@@ -104,6 +112,18 @@ export async function startMigration(
   }
   // Replace req.endpointIds with the cleaned version
   req.endpointIds = cleanIds;
+
+  // Step 0: both tenants must allow device migration (Sophos help, "Device
+  // migration", Sep 2026). A setting that cannot be read does not block.
+  const window = await checkMigrationWindow(direction);
+  const closed = [window.sending, window.receiving].filter((c) => c.status === "off" || c.status === "closed");
+  if (closed.length > 0) {
+    const names = closed.map((c) => `${c.tenantName || c.side} (the ${c.role} tenant): ${c.message}`);
+    return {
+      preflightFailures: [],
+      settingFailure: `Device migration is not allowed. ${names.join(" ")} Both tenants must allow it: in Sophos Fusion, go to Global Settings > Device Migration and turn on Allow device migration.`,
+    };
+  }
 
   // Step 1: preflight, load each endpoint from the "from" side
   const preflightFailures: PreflightFailure[] = [];

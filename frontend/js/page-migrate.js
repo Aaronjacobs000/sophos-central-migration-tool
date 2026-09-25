@@ -41,25 +41,31 @@ function windowTone(status) {
 }
 
 function renderWindow(res) {
+  // Both tenants must allow device migration, so the headline is whichever
+  // tenant is in the worse state, and the sending tenant when they tie.
+  const rank = { open: 0, closing: 1, unknown: 2, closed: 3, off: 3 };
   const s = res.sending;
   const r = res.receiving;
-  const tone = windowTone(s.status);
-  const label = { open: "Open", closing: "Closing soon", closed: "Closed", off: "Off", unknown: "Unknown" }[s.status];
-  const fix = ["off", "closed", "unknown"].includes(s.status)
-    ? `<p class="hint check-fix">In Sophos Fusion on the sending tenant, go to <strong>Overview &gt; Global Settings &gt; Device Migration</strong> and turn on <strong>Allow device migration</strong>. Then check again.</p>`
+  const main = (rank[r.status] ?? 2) > (rank[s.status] ?? 2) ? r : s;
+  const other = main === s ? r : s;
+  const roleLabel = (c) => (c.role === "receiving" ? "Receiving tenant" : "Sending tenant");
+  const tone = windowTone(main.status);
+  const label = { open: "Open", closing: "Closing soon", closed: "Closed", off: "Off", unknown: "Unknown" }[main.status];
+  const fix = ["off", "closed", "unknown"].includes(main.status)
+    ? `<p class="hint check-fix">Both tenants must allow device migration. In Sophos Fusion on the ${main.role} tenant, go to <strong>Overview &gt; Global Settings &gt; Device Migration</strong> and turn on <strong>Allow device migration</strong>. Then check again.</p>`
     : "";
   document.getElementById("window-body").innerHTML = `
     <div class="check-main" data-tone="${tone}">
       <span class="conn-dot" data-state="${tone === "ok" ? "ok" : tone === "bad" ? "error" : "warn"}"></span>
       <div>
-        <div class="check-title">Sending tenant${s.tenantName ? `, ${escapeHtml(s.tenantName)}` : ""} <span class="tag tag-${tone === "bad" ? "bad" : tone}">${label}</span></div>
-        <p>${escapeHtml(s.message)}</p>
-        ${s.error ? `<p class="ep-error">${escapeHtml(s.error)}</p>` : ""}
+        <div class="check-title">${roleLabel(main)}${main.tenantName ? `, ${escapeHtml(main.tenantName)}` : ""} <span class="tag tag-${tone === "bad" ? "bad" : tone}">${label}</span></div>
+        <p>${escapeHtml(main.message)}</p>
+        ${main.error ? `<p class="ep-error">${escapeHtml(main.error)}</p>` : ""}
       </div>
     </div>
     ${fix}
     <dl class="kv-list check-kv">
-      <dt>Receiving tenant</dt><dd>${escapeHtml(r.tenantName || r.side)}: ${escapeHtml(r.enabled === true ? "allowed" : r.enabled === false ? "turned off" : "unknown")}</dd>
+      <dt>${roleLabel(other)}</dt><dd>${escapeHtml(other.tenantName || other.side)}: ${escapeHtml(other.enabled === true ? "allowed" : other.enabled === false ? "turned off" : "unknown")}</dd>
       <dt>Checked</dt><dd>${escapeHtml(new Date(res.checkedAt).toLocaleTimeString())}</dd>
     </dl>`;
 }

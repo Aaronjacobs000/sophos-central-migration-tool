@@ -40,8 +40,8 @@
           <li>Open <strong>Global Settings &gt; API Credentials</strong> and add a credential with the Super Admin role. Copy the Client ID and Client Secret.</li>
           <li>Do the same in the <strong>destination</strong> tenant.</li>
           <li>This tool only uses tenant-scoped API credentials. Partner or organization credentials are not supported.</li>
-          <li>On the destination tenant, confirm <strong>Device Migration is enabled</strong> in
-            <em>Global Settings &gt; Device Migration</em>. The destination must allow incoming migrations within a set time window.</li>
+          <li>On both tenants, confirm <strong>Device Migration is enabled</strong> in
+            <em>Global Settings &gt; Device Migration</em>. Sophos needs the sending and the receiving tenant to allow migration, each within its time window.</li>
         </ol>
       </section>
 
@@ -71,7 +71,7 @@
         <h2>Checks before a move</h2>
         <p>The Start migration page runs two read-only checks:</p>
         <ul>
-          <li>Device Migration setting: whether the sending tenant allows devices to leave, and when that ends. It warns when the window closes within a day, because devices that have not checked in by then will not move.</li>
+          <li>Device Migration setting: whether both tenants allow migration, and when that ends. The tool creates no job while either has it off, and it warns when a window closes within a day, because devices that have not checked in by then will not move.</li>
           <li>Destination licences: free seats against the selected computers and servers, and products the source has that the destination lacks (endpoint and server protection, XDR, MDR, Device Encryption). Product names map loosely to features, so it warns and never blocks.</li>
         </ul>
       </section>

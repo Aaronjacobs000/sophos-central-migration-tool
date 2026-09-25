@@ -48,7 +48,7 @@ Eight global lists copy with the same duplicate check: scanning exclusions, allo
 
 - Moves devices from source to destination, or back again if something moved by mistake.
 - Shows both tenants' devices with OS, health, IP, user and last-seen time. Devices that have not checked in for 14 days are marked stale and cannot be selected, and the server checks the window again before it creates a job.
-- Before you start, the Start migration page reads the Device Migration setting on the sending tenant and says whether it is on, when it ends, or whether it closes within a day.
+- Before you start, the Start migration page reads the Device Migration setting on both tenants and says whether it is on, when it ends, or whether it closes within a day. Both tenants must allow migration, so the tool creates no job, and a dry run does not pass, while either one has it off or expired.
 - It also reads both tenants' licences, compares the destination's free seats with the selected computers and servers, and flags products the source has that the destination lacks (endpoint and server protection, XDR, MDR, Device Encryption). Product names map loosely to features, so this warns and never blocks.
 - A dry run shows the calls the real run would make, and the groups the selected devices are in.
 - The job page follows both sides through a server-sent event stream, with a progress bar and a row per device.
@@ -67,7 +67,7 @@ Eight global lists copy with the same duplicate check: scanning exclusions, allo
 - Sophos Fusion (formerly Sophos Central) API credentials, either:
   - a Client ID and Client Secret created in each tenant under *Global Settings > API Credentials* (Super Admin role recommended), or
   - one partner or organization credential that manages both tenants.
-- For device moves, Device Migration turned on in the sending tenant under *Global Settings > Device Migration*.
+- For device moves, Device Migration turned on in both tenants under *Global Settings > Device Migration*.
 
 ## Quick start
 
@@ -96,7 +96,7 @@ npm test
 
 The Sophos device migration API (`/endpoint/v1/migrations`) uses a two-tenant handshake:
 
-1. Pre-flight: Device Migration must be on in the sending tenant's Sophos Fusion console (*Overview > Global Settings > Device Migration*). The tool reads it with `GET /endpoint/v1/settings/migration` and shows the result before you start.
+1. Pre-flight: Device Migration must be on in both tenants' Sophos Fusion consoles (*Overview > Global Settings > Device Migration*). The tool reads it with `GET /endpoint/v1/settings/migration` on each, shows the result before you start, and creates no job while either is off. A receiving tenant accepts a receiver job whatever the sending tenant's setting, and that job cannot be deleted through the API, so the check runs first.
 2. Receiver job: `POST /endpoint/v1/migrations` on the receiving tenant with `fromTenant` (the sending tenant's ID) and `endpoints` (the device IDs). The response has the job `id` and a handshake `token`.
 3. Sender trigger: `PUT /endpoint/v1/migrations/{jobId}` on the sending tenant with the same job ID, the `token` and the `endpoints`. This starts the move; it does not create a second job.
 4. Polling: both sides are polled every 10 seconds and the browser gets the updates as server-sent events. Each device goes from `pending` to `succeeded` or `failed`. The job's overall status comes from the device results, because the API does not fill in a job-level status.
