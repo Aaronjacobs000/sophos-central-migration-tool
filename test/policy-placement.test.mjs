@@ -73,3 +73,21 @@ test("a source policy that cannot be read is reported in its own slot", async ()
   assert.equal(res[0].ok && res[2].ok, true);
   assert.deepEqual(fake.writes().map((w) => w.body.name), ["High", "Low"]);
 });
+
+test("overwriting a base policy sends its settings but not its name or enabled flag", async () => {
+  seed();
+  policies.src.push({ id: "sb", name: "Base Policy", type: "web-control", enabled: true, priority: 0, settings });
+  fake.reset();
+  // As the live API answers when either field is present.
+  fake.on(DST, "PATCH", "/endpoint/v1/policies/d0", (req) =>
+    "name" in req.body || "enabled" in req.body
+      ? { status: 400, body: { error: "badRequest", message: "Cannot update the enabled of a base policy. Cannot update the name of a base policy." } }
+      : { body: { id: "d0", name: "Base Policy", priority: 0, ...req.body } });
+  const [res] = await migratePolicies({ policyIds: ["sb"], overwrite: true });
+  assert.equal(res.ok, true, res.error);
+  assert.equal(res.action, "overwrite");
+  const [patch] = fake.writes();
+  assert.equal(patch.path, "/endpoint/v1/policies/d0");
+  assert.deepEqual(Object.keys(patch.body).sort(), ["settings", "type"].concat("enforced" in patch.body ? ["enforced"] : []).sort());
+  assert.deepEqual(patch.body.settings, settings);
+});

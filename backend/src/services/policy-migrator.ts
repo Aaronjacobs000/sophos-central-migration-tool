@@ -134,10 +134,15 @@ export async function migratePolicies(
       continue;
     }
 
+    // A base policy (priority 0) cannot be renamed or turned off, and the API
+    // refuses the whole update when name or enabled is in the body ("Cannot
+    // update the enabled of a base policy", measured 25/09/2026). Overwriting
+    // one sends its settings only.
+    const overwritingBase = match?.priority === 0;
     const body: Partial<SophosPolicy> = {
-      name: sourcePolicy.name,
+      ...(overwritingBase ? {} : { name: sourcePolicy.name }),
       type: sourcePolicy.type,
-      enabled: sourcePolicy.enabled,
+      ...(overwritingBase ? {} : { enabled: sourcePolicy.enabled }),
       ...(match ? {} : { priority: BOTTOM_PRIORITY }),
       enforced: sourcePolicy.enforced,
       settings: sanitizeSettings(sourcePolicy.settings),
