@@ -14,7 +14,7 @@ async function boot() {
 
   // Store direction on the form for use in submission
   document.getElementById("migrate-form").dataset.direction = direction;
-  renderSelection(ids);
+  renderSelection(ids, direction);
   wireForm(ids);
 
   loadWindow(direction);
@@ -138,7 +138,7 @@ function loadSelection() {
   }
 }
 
-async function renderSelection(ids) {
+async function renderSelection(ids, direction) {
   const list = document.getElementById("selection-list");
   if (ids.length === 0) {
     list.innerHTML = `<div class="empty-state">No endpoints selected. Pick devices on the <a href="/endpoints.html">Endpoints</a> page first.</div>`;
@@ -146,12 +146,13 @@ async function renderSelection(ids) {
   }
   list.innerHTML = `<p class="hint"><strong>${ids.length}</strong> device${ids.length === 1 ? "" : "s"} selected.</p>`;
 
-  // Best-effort enrich with hostnames
+  // Best-effort enrich with hostnames, read from the side the devices are on.
+  const side = direction === "dest-to-source" ? "dest" : "source";
   try {
     const details = [];
     for (const id of ids.slice(0, 30)) {
       try {
-        const ep = await api.get(`/api/source/endpoints/${encodeURIComponent(id)}`);
+        const ep = await api.get(`/api/${side}/endpoints/${encodeURIComponent(id)}`);
         details.push({ id, hostname: ep.hostname || "(unknown)", lastSeen: ep.lastSeenAt });
       } catch {
         details.push({ id, hostname: "(load failed)", lastSeen: null });
