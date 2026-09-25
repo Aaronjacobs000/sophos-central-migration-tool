@@ -304,7 +304,7 @@ function renderEndpoints(job) {
 }
 
 async function cancelJob(id) {
-  if (!confirm("Cancel this migration?\n\nThis deletes both upstream sender and receiver jobs.")) return;
+  if (!confirm("Cancel this migration?\n\nThe tool asks both tenants to delete the job. The Sophos migrations API has no cancel operation, so this can be refused, and a move that has started carries on.")) return;
   try {
     await api.del(`/api/migrate/devices/jobs/${encodeURIComponent(id)}`);
     toast("Migration cancelled.", "info");

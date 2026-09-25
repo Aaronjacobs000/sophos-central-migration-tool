@@ -53,7 +53,7 @@ Eight global lists copy with the same duplicate check: scanning exclusions, allo
 - A dry run shows the calls the real run would make, and the groups the selected devices are in.
 - The job page follows both sides through a server-sent event stream, with a progress bar and a row per device.
 - The Migrations page merges jobs from both tenants' APIs with the ones started here, so moves started in the Sophos Fusion console or from another workstation show too.
-- Jobs are kept in `data/migration-jobs.json`, so a job page still opens after a browser refresh or a server restart. Cancelling a job deletes both upstream jobs after you confirm.
+- Jobs are kept in `data/migration-jobs.json`, so a job page still opens after a browser refresh or a server restart. Cancel asks both tenants to delete the job. The migrations API documents no delete and answered 404 on 25/09/2026, so a job is marked cancelled only when a tenant confirms the delete, and a move that has started carries on.
 
 ### Around the tool
 

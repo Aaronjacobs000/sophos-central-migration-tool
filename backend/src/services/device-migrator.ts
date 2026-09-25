@@ -326,17 +326,23 @@ export async function cancelJob(localJobId: string): Promise<void> {
   const src = requireContext("source");
   const dst = requireContext("dest");
 
-  await Promise.allSettled([
+  // The migrations API documents no delete, and on 25/09/2026 DELETE answered
+  // 404 while GET still returned the job. Record what each tenant said, and
+  // only mark the job cancelled when one of them confirmed the delete.
+  const [srcDel, dstDel] = await Promise.allSettled([
     deleteMigrationJob(src.client, src.tenantId, job.sourceMigrationId),
     deleteMigrationJob(dst.client, dst.tenantId, job.destMigrationId),
   ]);
+  const reason = (r: PromiseSettledResult<void>) =>
+    r.status === "rejected" ? (r.reason instanceof Error ? r.reason.message : String(r.reason)) : undefined;
   await audit({
     side: "source",
     tenantId: src.tenantId,
     action: "delete",
     resource: "migration-sender",
     resourceId: job.sourceMigrationId,
-    ok: true,
+    ok: srcDel.status === "fulfilled",
+    ...(reason(srcDel) ? { error: reason(srcDel) } : {}),
   });
   await audit({
     side: "dest",
@@ -344,8 +350,14 @@ export async function cancelJob(localJobId: string): Promise<void> {
     action: "delete",
     resource: "migration-receiver",
     resourceId: job.destMigrationId,
-    ok: true,
+    ok: dstDel.status === "fulfilled",
+    ...(reason(dstDel) ? { error: reason(dstDel) } : {}),
   });
+  if (srcDel.status === "rejected" && dstDel.status === "rejected") {
+    throw new Error(
+      `Sophos did not cancel the job, so a move that has started carries on. The migrations API has no cancel operation. Source: ${reason(srcDel)} Destination: ${reason(dstDel)}`,
+    );
+  }
   await updateJob(localJobId, { status: "cancelled" });
 }
 
