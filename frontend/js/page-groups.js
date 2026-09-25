@@ -102,7 +102,7 @@ function renderTable(side) {
     const onBoth = otherNames.has(g.name.toLowerCase());
     const badge = side === "source" && !onBoth ? `<span class="tag tag-src">not on destination</span>` : "";
     const extra = tab === "user"
-      ? `<td><span class="hint">${esc(g.source || "")}</span></td><td class="tnum">${g.usersCount ?? "-"}</td>`
+      ? `<td><span class="hint">${esc(g.source?.type ?? g.source ?? "")}</span></td><td class="tnum">${g.usersCount ?? g.users?.total ?? "-"}</td>`
       : `<td><span class="tag tag-muted">${esc(g.type || g.endpointType || "")}</span></td>`;
     const deleteBtn = side === "dest"
       ? `<td class="col-actions">${rowMenu([{ label: "Delete from destination", icon: "trash", danger: true, attrs: `data-delete="${escAttr(g.id)}" data-name="${escAttr(g.name)}"` }])}</td>`
