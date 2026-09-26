@@ -114,6 +114,13 @@ export function outcomeOf(r) {
   return "created";
 }
 
+/** How many results have each outcome, counted the way the results list tags them. */
+export function countOutcomes(results) {
+  const n = { created: 0, "would-create": 0, skipped: 0, failed: 0 };
+  for (const r of results) n[outcomeOf(r)]++;
+  return n;
+}
+
 /**
  * Modal listing what a preview or a copy did.
  * groups: [{ title, rows: [{ outcome, text, error, notes }] }]

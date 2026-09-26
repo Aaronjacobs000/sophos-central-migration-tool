@@ -3,7 +3,7 @@ import { api } from "./api.js";
 import { toast } from "./toast.js";
 import { getCachedSection, refreshSection } from "./preload-client.js";
 import { makeSortable } from "./sortable.js";
-import { rowMenu, wireRowMenus, plural, resultsModal, outcomeOf, onDestCell, ON_DEST_HEADER } from "./ui.js";
+import { rowMenu, wireRowMenus, plural, resultsModal, outcomeOf, countOutcomes, onDestCell, ON_DEST_HEADER } from "./ui.js";
 
 // The first three types come from the preload cache and can be deleted on
 // the destination. The rest are read on demand and are copy only.
@@ -344,9 +344,9 @@ function wireBasket() {
     if (!confirm(`Copy ${state.selectedSource.size} item(s) to destination?`)) return;
     try {
       const res = await api.post("/api/migrate/exclusions", { selections });
-      const ok = res.results?.filter((r) => r.ok).length ?? 0;
-      const failed = res.results?.filter((r) => !r.ok).length ?? 0;
-      toast(`Copied ${ok} / failed ${failed}`, failed ? "err" : "ok");
+      // Items already on the destination are skipped, so they are not counted as copied.
+      const n = countOutcomes(res.results ?? []);
+      toast(`Copied ${n.created} / failed ${n.failed}`, n.failed ? "err" : "ok");
       showResults(res.results ?? [], false);
       state.selectedSource.clear();
       renderBasket();
@@ -386,7 +386,8 @@ function describe(type, id) {
 }
 
 function showResults(results, dryRun) {
-  const creates = results.filter((r) => r.ok && (r.action === "create" || r.action === "dry-run-create")).length;
+  const n = countOutcomes(results);
+  const creates = dryRun ? n["would-create"] : n.created;
   resultsModal({
     title: dryRun ? "Preview: nothing was written" : "Copy results",
     summary: dryRun
