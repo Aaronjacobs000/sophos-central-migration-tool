@@ -8,6 +8,7 @@ import {
   renderValue,
 } from "./diff-view.js";
 import { toast } from "./toast.js";
+import { plural, resultsModal, outcomeOf } from "./ui.js";
 
 const state = {
   sourcePolicy: null,
@@ -19,6 +20,8 @@ const state = {
   filter: "",
 };
 
+let compareUrl = "";
+
 async function boot() {
   const params = new URLSearchParams(window.location.search);
   const sourceId = params.get("sourceId");
@@ -29,12 +32,17 @@ async function boot() {
     return;
   }
 
-  const url = destId
+  compareUrl = destId
     ? `/api/compare/policies/${encodeURIComponent(sourceId)}/${encodeURIComponent(destId)}`
     : `/api/compare/policies/${encodeURIComponent(sourceId)}`;
 
+  if (await load()) wireToolbar();
+}
+
+/** Fetch the comparison and draw it. False when it could not be loaded. */
+async function load() {
   try {
-    const res = await api.get(url);
+    const res = await api.get(compareUrl);
     state.sourcePolicy = res.sourcePolicy;
     state.destPolicy = res.destPolicy;
     state.ambiguous = !!res.ambiguous;
@@ -45,10 +53,11 @@ async function boot() {
     );
     renderHeader();
     renderBody();
-    wireToolbar();
+    return true;
   } catch (err) {
     document.getElementById("header-area").innerHTML =
       `<div class="banner banner-err">${escapeHtml(err.message || "Failed to compare")}</div>`;
+    return false;
   }
 }
 
@@ -171,7 +180,8 @@ function wireToolbar() {
 }
 
 async function cloneToDest() {
-  const verb = state.destPolicy
+  const overwrite = !!state.destPolicy;
+  const verb = overwrite
     ? "overwrite the destination policy with source"
     : "clone this policy to the bottom of the destination's priority order";
   // An overwrite sends the source's name too, so a policy paired ignoring case takes the source's name.
@@ -179,28 +189,47 @@ async function cloneToDest() {
     ? `\n\nThe destination policy "${state.destPolicy.name}" is renamed "${state.sourcePolicy.name}".`
     : "";
   if (!confirm(`Are you sure you want to ${verb}?${rename}`)) return;
+  let results;
   try {
     const res = await api.post("/api/migrate/policies", {
       policyIds: [state.sourcePolicy.id],
-      overwrite: !!state.destPolicy,
+      overwrite,
     });
-    const ok = res.results?.filter((r) => r.ok).length ?? 0;
-    let suffix = "";
-    const adjustments = res.results?.[0]?.adjustments;
-    if (adjustments?.length) {
-      suffix += ` ${adjustments.length} setting${adjustments.length === 1 ? "" : "s"} adjusted for destination.`;
-    }
-    if (ok > 0) {
-      toast(`Policy migrated.${suffix} Re-running compare…`, "ok");
-      // Re-fetch the comparison so the user sees the new state
-      setTimeout(() => window.location.reload(), 800);
-    } else {
-      const err = res.results?.[0]?.error ?? "Unknown error";
-      toast(`Migration failed: ${err}`, "err");
-    }
+    results = res.results ?? [];
   } catch (err) {
-    toast(err.message || "Migration failed", "err");
+    // The request itself failed: one failed row with the reason.
+    results = [{ sourceId: state.sourcePolicy.id, ok: false, action: overwrite ? "overwrite" : "create", error: err.message || "Migration failed" }];
   }
+  showResults(results, overwrite);
+  // Compare again so the page shows the new state. The results list stays open over it.
+  if (results.some((r) => r.ok)) await load();
+}
+
+/**
+ * The results list, as on the Policies page: the policy tagged updated for an
+ * overwrite, created or already there for a clone, or failed with the reason,
+ * with notes on settings changed to fit.
+ */
+function showResults(results, overwrite) {
+  const rows = results.map((r) => ({
+    outcome: r.ok && r.action === "overwrite" ? "updated" : outcomeOf(r),
+    text: state.sourcePolicy.name,
+    error: r.error,
+    notes: r.adjustments,
+  }));
+  const done = overwrite ? "updated" : "created";
+  const count = (outcome) => rows.filter((r) => r.outcome === outcome).length;
+  toast(`${overwrite ? "Updated" : "Cloned"} ${count(done)} / failed ${count("failed")}`, count("failed") ? "err" : "ok");
+  resultsModal({
+    title: overwrite ? "Overwrite results" : "Clone results",
+    summary: `${plural(count(done), "policy", "policies")} ${done} on the destination. Each write is in data/audit.log.`,
+    groups: [{ title: productLabel(state.sourcePolicy.type), rows }],
+  });
+}
+
+/** "web-control" as "Web Control", as the Policies page labels a product. */
+function productLabel(type) {
+  return type.split(/[-_]/).map((s) => s.charAt(0).toUpperCase() + s.slice(1)).join(" ");
 }
 
 function escapeHtml(s) {

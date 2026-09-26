@@ -64,3 +64,22 @@ test("policies: both clone buttons show the results list", async () => {
   assert.match(report, /notes: r\.adjustments/);
   assert.match(report, /plural\(n\.created, "policy", "policies"\)/);
 });
+
+test("policy Compare: an overwrite or clone shows the results list, which stays open while Compare runs again", async () => {
+  const js = await page("page-policy-compare.js");
+  const write = js.slice(js.indexOf("async function cloneToDest"), js.indexOf("function showResults"));
+  assert.equal([...js.matchAll(/api\.post\("\/api\/migrate\/policies"/g)].length, 1);
+  assert.match(write, /showResults\(results, overwrite\);/);
+  // A request that fails outright is a failed row with its reason.
+  assert.match(write, /results = \[\{ sourceId: state\.sourcePolicy\.id, ok: false, [^\]]*error: err\.message/);
+  // Compare runs again in place: a page reload would close the list.
+  assert.match(write, /if \(results\.some\(\(r\) => r\.ok\)\) await load\(\);/);
+  assert.doesNotMatch(js, /location\.reload/);
+  const list = js.slice(js.indexOf("function showResults"));
+  assert.match(list, /outcome: r\.ok && r\.action === "overwrite" \? "updated" : outcomeOf\(r\)/);
+  assert.match(list, /error: r\.error/);
+  assert.match(list, /notes: r\.adjustments/);
+  assert.match(list, /resultsModal\(\{/);
+  const ui = await readFile(new URL("../frontend/js/ui.js", import.meta.url), "utf8");
+  assert.match(ui, /updated: `<span class="tag tag-ok">updated<\/span>`/);
+});

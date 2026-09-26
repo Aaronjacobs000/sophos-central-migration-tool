@@ -96,6 +96,7 @@ export function stackBar(c) {
 
 const OUTCOME = {
   created: `<span class="tag tag-ok">created</span>`,
+  updated: `<span class="tag tag-ok">updated</span>`,
   "would-create": `<span class="tag tag-accent">would create</span>`,
   skipped: `<span class="tag tag-muted">already there</span>`,
   failed: `<span class="tag tag-bad">failed</span>`,
