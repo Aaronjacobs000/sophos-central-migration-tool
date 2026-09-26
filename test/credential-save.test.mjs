@@ -128,6 +128,8 @@ test("a lock that outlasts the retries fails the save clearly, leaves the file w
   assert.equal(await readFile(vaultFile, "utf8"), before, "the file is as it was");
   assert.deepEqual(await tempFiles(), []);
   assertNoContents(getRingBuffer().slice(logStart).map((e) => e.message).join("\n"), idsBefore);
+  // Before 26/09/2026 the log said the file "was written in place" before the write in place, which then failed.
+  assert.ok(!getRingBuffer().slice(logStart).some((e) => /written in place/.test(e.message)), "no claim of a write that did not happen");
   for (const [i, id] of ids.entries()) assert.equal((await creds.getCredential(id)).clientId, cred(i).clientId);
 
   const id = await creds.putCredential("tenant", cred(23));

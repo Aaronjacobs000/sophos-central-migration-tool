@@ -100,12 +100,13 @@ export async function saveFile(
   } catch (err) {
     await fs.rm(temp, { force: true }).catch(() => {});
     if (!isLock(err) || !opts.inPlaceIsSafe || !(await opts.inPlaceIsSafe())) throw fail(err);
-    log.emit("warn", opts.section, `${name} stayed locked (${(err as NodeJS.ErrnoException).code}), so it was written in place.`);
     try {
       await withRetry(opts.section, `write ${name}`, () => writeFlushed(file, text, opts.mode));
     } catch (writeErr) {
       throw fail(writeErr);
     }
+    // Logged once the write has worked: a write in place that fails is reported by the error alone.
+    log.emit("warn", opts.section, `${name} stayed locked (${(err as NodeJS.ErrnoException).code}), so it was written in place.`);
   }
   // A mode only applies when a file is created, and a file written in place keeps its own.
   if (opts.mode !== undefined) await fs.chmod(file, opts.mode).catch(() => {});
