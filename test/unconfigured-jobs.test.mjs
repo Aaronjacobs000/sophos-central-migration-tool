@@ -40,12 +40,15 @@ fake.on(DST, "GET", "/endpoint/v1/endpoint-groups/dg-fin/endpoints", () => ({ bo
 
 const jobsFile = path.join(root, "data", "migration-jobs.json");
 
-// One job started while connected, which stores its credentials, and a copy of it with none stored.
+// One job started while connected, which stores its credentials, and a copy of it with none stored. Both are
+// marked as just checked, so the list starts no background checks: the store does not queue its reads behind
+// its writes, and a request that reads the jobs file mid-write fails.
 const started = await http.post("/api/migrate/devices", { jobName: "Finance laptops, wave 1", endpointIds: [DEVICE] });
 assert.equal(started.status, 201);
 const jobId = started.body.job.localJobId;
 assert.equal(started.body.job.credentials.stored, true);
-const jobs = JSON.parse(await readFile(jobsFile, "utf8"));
+const lastPolledAt = new Date().toISOString();
+const jobs = JSON.parse(await readFile(jobsFile, "utf8")).map((j) => ({ ...j, lastPolledAt }));
 const { credentials: _dropped, ...bare } = jobs.find((j) => j.localJobId === jobId);
 await writeFile(jobsFile, JSON.stringify([...jobs, { ...bare, localJobId: "no-creds", jobName: "Finance laptops, wave 2", monitor: undefined }], null, 2));
 
