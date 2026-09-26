@@ -27,16 +27,19 @@ export function isLock(err: unknown): boolean {
   return !!code && RETRYABLE_CODES.has(code);
 }
 
-/** Run a file operation, retrying while the file is locked. Retries are logged under `section`. */
-export async function withRetry<T>(section: string, label: string, fn: () => Promise<T>): Promise<T> {
+/**
+ * Run a file operation, retrying while the file is locked (at most `retries`
+ * times, 5 by default). Retries are logged under `section`.
+ */
+export async function withRetry<T>(section: string, label: string, fn: () => Promise<T>, retries = MAX_RETRIES): Promise<T> {
   for (let attempt = 0; ; attempt++) {
     try {
       return await fn();
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
-      if (code && RETRYABLE_CODES.has(code) && attempt < MAX_RETRIES) {
+      if (code && RETRYABLE_CODES.has(code) && attempt < retries) {
         const delay = baseDelayMs * Math.pow(2, attempt);
-        log.emit("warn", section, `${label}: ${code}, retry ${attempt + 1}/${MAX_RETRIES} in ${delay}ms`);
+        log.emit("warn", section, `${label}: ${code}, retry ${attempt + 1}/${retries} in ${delay}ms`);
         await new Promise((r) => setTimeout(r, delay));
         continue;
       }

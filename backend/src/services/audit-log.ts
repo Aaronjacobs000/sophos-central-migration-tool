@@ -5,7 +5,10 @@
  * Appends retry while OneDrive or antivirus holds the file (safe-files.ts).
  * An entry that still can't be written never turns a write Sophos made into
  * a failure: it goes to the tool's log, and the response carries a warning
- * (auditOrWarn, auditWarnings).
+ * (auditOrWarn, auditWarnings). Once a lock has outlasted the retries, the
+ * appends after it try once each, until one gets through or for
+ * LOCKED_QUICK_MS after the last locked try, so a bulk copy doesn't wait out
+ * the retries (about 4.7 s) on every item.
  */
 
 import { promises as fs } from "node:fs";
@@ -35,6 +38,10 @@ export interface AuditEntry {
 
 let writeQueue: Promise<void> = Promise.resolve();
 
+/** How long after an append stayed locked past its retries the next appends try only once. */
+const LOCKED_QUICK_MS = 30_000;
+let lockedUntil = 0;
+
 export async function audit(entry: Omit<AuditEntry, "id" | "ts">): Promise<void> {
   const full: AuditEntry = {
     id: randomUUID(),
@@ -50,7 +57,14 @@ export async function audit(entry: Omit<AuditEntry, "id" | "ts">): Promise<void>
   // that fails fails alone: the next one still runs.
   const write = async () => {
     await fs.mkdir(dir, { recursive: true });
-    await withRetry(SECTION, "append audit.log", () => fs.appendFile(file, JSON.stringify(full) + "\n", { encoding: "utf8" }));
+    const quick = Date.now() < lockedUntil;
+    try {
+      await withRetry(SECTION, "append audit.log", () => fs.appendFile(file, JSON.stringify(full) + "\n", { encoding: "utf8" }), quick ? 0 : undefined);
+      lockedUntil = 0;
+    } catch (err) {
+      if (isLock(err)) lockedUntil = Date.now() + LOCKED_QUICK_MS;
+      throw err;
+    }
   };
   const run = writeQueue.then(write, write);
   writeQueue = run.catch(() => {});

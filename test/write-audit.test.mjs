@@ -234,6 +234,32 @@ test("a lock on the audit log that clears within the retries: the entry is writt
   assert.ok(getRingBuffer().some((e) => e.section === "audit" && /append audit\.log: EBUSY, retry 1\/5/.test(e.message)));
 });
 
+test("once a lock outlasts the retries, the next entries try once each, and full retries return once one is written", async () => {
+  const calls = lockAudit(Infinity);
+  const entry = (resource) => audit({ side: "dest", tenantId: DST.tenantId, action: "create", resource, ok: true });
+  try {
+    await assert.rejects(() => entry("locked-1"), { code: "EBUSY" });
+    assert.equal(calls(), 6, "the first entry waits out the five retries");
+    for (let i = 2; i <= 5; i++) await assert.rejects(() => entry(`locked-${i}`), { code: "EBUSY" });
+    assert.equal(calls(), 10, "the next four try once each, so a bulk copy is not slowed per item");
+  } finally {
+    fsp.appendFile = appendFile;
+  }
+  await entry("unlocked-1");
+  const resources = (await readAudit(root)).map((e) => e.resource);
+  assert.ok(resources.includes("unlocked-1"), "written on its one try once the file is free");
+  assert.ok(!resources.some((r) => /^locked-/.test(r)));
+  // Written once: the next lock gets the full retries again.
+  const again = lockAudit(2);
+  try {
+    await entry("unlocked-2");
+  } finally {
+    fsp.appendFile = appendFile;
+  }
+  assert.equal(again(), 3);
+  assert.ok((await readAudit(root)).some((e) => e.resource === "unlocked-2"));
+});
+
 test("an audit entry that can't be written leaves the write's result as it is, with a warning, and the entry in the tool's log", async () => {
   refuse = () => false;
   const before = await readFile(auditFile, "utf8");
