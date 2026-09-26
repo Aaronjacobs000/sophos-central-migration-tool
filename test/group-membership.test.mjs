@@ -1,7 +1,7 @@
 // API #4: group membership after a move, using the newId the migration job returns.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { writeFile, mkdir } from "node:fs/promises";
+import { writeFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { createFakeSophos, SRC, DST, page } from "./helpers/fake-sophos.mjs";
 import { bootApp, readAudit } from "./helpers/app.mjs";
@@ -115,7 +115,114 @@ test("dry run: plans additions by name, skips members and reports gaps, writes n
   assert.equal(by(3).status, "group-missing");
   assert.equal(by(4).status, "no-group");
   assert.equal(by(5).status, "not-moved");
-  assert.deepEqual(res.groups, [{ name: "Finance", destGroupId: "dg-fin", ids: ["new-1"], ok: null }]);
+  assert.deepEqual(res.groups, [{ name: "FINANCE", destGroupId: "dg-fin", ids: ["new-1"], ok: null }]);
+  assert.deepEqual(res.destGroups, [{ id: "dg-fin", name: "FINANCE", type: "computer" }], "the picker's list");
+  assert.match(by(3).message, /no group named "SQL" on the destination; pick one, or mirror it on the Groups page first/);
+  assert.match(by(4).message, /pick a destination group to add it/);
+});
+
+test("picked groups: a device goes to the group picked for it, one in no group can be placed, and null leaves one out", async () => {
+  seedMoved();
+  destGroups.push({ id: "dg-child", name: "Child", type: "computer" }, { id: "dg-srv", name: "Servers", type: "server" });
+  await writeJobs([baseJob()]);
+  // uuid(1) was in Finance and goes to Child; uuid(4) was in no group; uuid(2) is left out; uuid(3) keeps the default.
+  const choices = { [uuid(1)]: "dg-child", [uuid(4)]: "dg-child", [uuid(2)]: null };
+  fake.reset();
+  const dry = await restoreGroupMembership("local-1", { dryRun: true, choices });
+  assert.equal(fake.writes().length, 0);
+  const by = (res, n) => res.rows.find((r) => r.endpointId === uuid(n));
+  assert.equal(by(dry, 1).status, "will-add");
+  assert.equal(by(dry, 1).destGroupId, "dg-child");
+  assert.equal(by(dry, 4).status, "will-add");
+  assert.equal(by(dry, 4).destGroupId, "dg-child");
+  assert.equal(by(dry, 2).status, "left-out");
+  assert.equal(by(dry, 3).status, "group-missing", "no pick and no same-name group");
+  assert.equal(dry.counts["left-out"], 1);
+  assert.deepEqual(dry.groups, [{ name: "Child", destGroupId: "dg-child", ids: ["new-1", "new-4"], ok: null }]);
+  assert.deepEqual(dry.destGroups.map((g) => g.name), ["Child", "FINANCE", "Servers"], "sorted by name");
+
+  fake.reset();
+  const before = (await readAudit(root)).length;
+  const real = await restoreGroupMembership("local-1", { dryRun: false, choices });
+  const posts = fake.writes();
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].path, "/endpoint/v1/endpoint-groups/dg-child/endpoints");
+  assert.deepEqual(posts[0].body, { ids: ["new-1", "new-4"] });
+  assert.ok(!JSON.stringify(fake.calls).includes("new-2"), "the device left out gets no request");
+  assert.equal(by(real, 1).status, "added");
+  assert.equal(by(real, 4).status, "added");
+  const entries = (await readAudit(root)).slice(before);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].detail.group, "Child");
+});
+
+test("a picked group that is not on the destination is reported, and nothing is written", async () => {
+  seedMoved();
+  await writeJobs([baseJob()]);
+  fake.reset();
+  const res = await restoreGroupMembership("local-1", { dryRun: false, choices: { [uuid(1)]: "dg-gone" } });
+  const r1 = res.rows.find((r) => r.endpointId === uuid(1));
+  assert.equal(r1.status, "group-missing");
+  assert.match(r1.message, /the group picked is not on the destination any more/);
+  assert.equal(fake.writes().length, 0);
+});
+
+test("the route passes the picks through and refuses a malformed one", async () => {
+  const { startHttp } = await import("./helpers/http.mjs");
+  const { migrateDevicesRouter } = await import("../backend/dist/routes/migrate-devices.js");
+  const http = await startHttp([migrateDevicesRouter]);
+  try {
+    seedMoved();
+    destGroups.push({ id: "dg-child", name: "Child", type: "computer" });
+    await writeJobs([baseJob()]);
+    const url = "/api/migrate/devices/jobs/local-1/group-membership";
+    for (const choices of [[uuid(1)], { [uuid(1)]: 5 }, { [uuid(1)]: "" }, "dg-child"]) {
+      const bad = await http.post(url, { dryRun: true, choices });
+      assert.equal(bad.status, 400, JSON.stringify(choices));
+      assert.match(bad.body.message, /choices must map device IDs to a group ID or null/);
+    }
+    const ok = await http.post(url, { dryRun: true, choices: { [uuid(4)]: "dg-child", [uuid(1)]: null } });
+    assert.equal(ok.status, 200);
+    assert.equal(ok.body.rows.find((r) => r.endpointId === uuid(4)).status, "will-add");
+    assert.equal(ok.body.rows.find((r) => r.endpointId === uuid(1)).status, "left-out");
+    const none = await http.post(url, { dryRun: true });
+    assert.equal(none.body.rows.find((r) => r.endpointId === uuid(4)).status, "no-group", "no picks: the same-name match only");
+  } finally {
+    http.close();
+  }
+});
+
+test("the job page picks a group per row and sends the picks with each preview and write", async () => {
+  const js = await readFile(new URL("../frontend/js/page-migrate-job-detail.js", import.meta.url), "utf8");
+  const html = await readFile(new URL("../frontend/migrate-job-detail.html", import.meta.url), "utf8");
+  assert.match(js, /\/group-membership`, \{ dryRun, choices: state\.memberChoices \}\)/);
+  assert.match(js, /document\.addEventListener\("change", onMemberPick\)/);
+  assert.match(js, /<th>Destination group<\/th>/);
+  // No same-name match: "Pick a group", marked, and the device is not added until one is picked.
+  assert.match(js, /value \? "" : `<option value="" selected>Pick a group<\/option>`/);
+  assert.match(js, /member-pick\$\{value \? "" : " is-warn"\}/);
+  assert.match(js, /<option value="none"[^`]*>Don't add<\/option>/);
+  assert.match(js, /"no-group": \["tag-warn", "no group"\]/);
+  assert.match(html, /Pick another group, or\s+<em>Don't add<\/em>, in its row/);
+});
+
+test("the picker's labels and choices behave in the page", async () => {
+  // The page module needs a DOM to boot, so check the picker's markup by evaluating the function alone.
+  const js = await readFile(new URL("../frontend/js/page-migrate-job-detail.js", import.meta.url), "utf8");
+  const src = js.slice(js.indexOf("function groupPicker"), js.indexOf("\nboot();"));
+  const { esc, escAttr } = await import("../frontend/js/ui.js");
+  const groupPicker = new Function("esc", "escAttr", `${src}; return groupPicker;`)(esc, escAttr);
+  const groups = [{ id: "g1", name: "Child", type: "computer" }, { id: "g2", name: "Servers", type: "server" }];
+  const matched = groupPicker({ endpointId: "e1", hostname: "WIN10", status: "will-add", destGroupId: "g1" }, groups);
+  assert.match(matched, /<option value="g1" selected>Child<\/option>/);
+  assert.doesNotMatch(matched, /Pick a group|is-warn/);
+  assert.match(matched, /Servers \(servers\)/);
+  const unmatched = groupPicker({ endpointId: "e1", hostname: "WIN10", status: "no-group", destGroupId: null }, groups);
+  assert.match(unmatched, /<option value="" selected>Pick a group<\/option>/);
+  assert.match(unmatched, /class="member-pick is-warn"/);
+  const out = groupPicker({ endpointId: "e1", hostname: "WIN10", status: "left-out", destGroupId: null }, groups);
+  assert.match(out, /<option value="none" selected>Don't add<\/option>/);
+  assert.doesNotMatch(out, /Pick a group/);
 });
 
 test("real run: posts the new IDs to the destination group and audits it", async () => {

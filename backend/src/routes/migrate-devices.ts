@@ -8,7 +8,8 @@
  *   POST   /api/migrate/devices/jobs/:id/credentials     attach credentials to a job
  *   POST   /api/migrate/devices/jobs/:id/credentials/remove  remove them
  *   POST   /api/migrate/devices/jobs/:id/group-membership  put moved devices
- *          back into same-named groups ({ dryRun: true } or { dryRun: false })
+ *          back into same-named groups ({ dryRun: true } or { dryRun: false }),
+ *          or the groups picked in choices ({ [endpointId]: groupId or null })
  *
  * Jobs are checked with their own tenants and stored credentials
  * (services/job-access.ts), so only starting a job needs the tool's current
@@ -247,6 +248,8 @@ migrateDevicesRouter.post("/migrate/devices/jobs/:id/credentials/remove", jsonOn
 /**
  * The caller must say whether this is a dry run, in JSON, so a post from
  * another site (or one that leaves dryRun out) never adds devices to groups.
+ * choices, when sent, maps a device's ID on the sending tenant to the
+ * destination group to add it to, or to null to leave it out.
  */
 migrateDevicesRouter.post("/migrate/devices/jobs/:id/group-membership", jsonOnly, async (req, res, next) => {
   try {
@@ -254,8 +257,15 @@ migrateDevicesRouter.post("/migrate/devices/jobs/:id/group-membership", jsonOnly
       res.status(400).json({ error: "bad_request", message: "dryRun (true or false) is required" });
       return;
     }
+    const choices = req.body.choices ?? {};
+    const valid = choices && typeof choices === "object" && !Array.isArray(choices) &&
+      Object.values(choices).every((v) => v === null || (typeof v === "string" && v.length > 0));
+    if (!valid) {
+      res.status(400).json({ error: "bad_request", message: "choices must map device IDs to a group ID or null" });
+      return;
+    }
     const dryRun = req.query?.dryRun === "true" || req.body.dryRun === true;
-    res.json(await restoreGroupMembership(req.params.id!, { dryRun }));
+    res.json(await restoreGroupMembership(req.params.id!, { dryRun, choices }));
   } catch (err) {
     if (err instanceof JobNotFoundError) {
       res.status(404).json({ error: "not_found", message: err.message });

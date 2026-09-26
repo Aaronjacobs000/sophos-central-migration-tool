@@ -90,8 +90,10 @@
           <strong>Group membership</strong> card on the job page adds each moved device to the destination group
           with the same name, so policies assigned to that group follow it. Mirror the groups first. Groups synced
           from Active Directory cannot be changed through the API and are reported.</p>
-        <p>The re-add matches by the device's group name on the sending tenant, so a device that was in no group there
-          can't be put back in a group automatically.</p>
+        <p>Each device's row has a picker of the destination's groups. It starts on the group with the same name. When
+          there is none, for example a device that was in no group on the sending tenant, or one that went through a
+          tenant without its group and back, it says <em>Pick a group</em> in amber and the device is not added until
+          you pick one. <em>Don't add</em> leaves a device out.</p>
       </section>
 
       <section class="panel-card">

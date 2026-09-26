@@ -62,9 +62,10 @@
           <button id="membership-preview" class="btn btn-small" data-action="membership-preview">Preview</button>
           <button id="membership-apply" class="btn btn-small btn-primary" data-action="membership-apply" disabled>Add to groups</button>
         </div>
-        <p class="card-sub">Adds each moved device to the destination group with the same name as its group on the sending
-          tenant, so policies assigned to that group follow it. Devices already in the group are skipped. Mirror missing
-          groups on the <a href="/groups.html">Groups</a> page first.</p>
+        <p class="card-sub">Adds each moved device to a destination group, so policies assigned to that group follow it.
+          Each device starts on the group with the same name as its group on the sending tenant. Pick another group, or
+          <em>Don't add</em>, in its row; a device with no such group waits for you to pick one. Devices already in the
+          group are skipped. To use the source's group, mirror it on the <a href="/groups.html">Groups</a> page first.</p>
         <div id="membership-body"><div class="empty-state">Available once devices have moved.</div></div>
       </section>
     </div>

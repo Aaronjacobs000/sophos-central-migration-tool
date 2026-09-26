@@ -12,6 +12,11 @@
  *   3. POST /endpoint/v1/endpoint-groups/{id}/endpoints on the receiving
  *      tenant adds the new IDs, skipping devices already in the group.
  *
+ * The caller can pick the destination group per device instead (choices),
+ * which is how a device goes back into a group the sending tenant doesn't
+ * have, or in no group there: a round trip through a tenant without that
+ * group loses the name. A choice of null leaves the device out.
+ *
  * Group assignments carry policy with them, so a policy assigned to a group
  * follows the device. Groups synced from Active Directory refuse API writes
  * (HTTP 409); that is reported per group. Supports dry run, and every write
@@ -38,6 +43,7 @@ export type MembershipStatus =
   | "not-moved"
   | "move-failed"
   | "no-new-id"
+  | "left-out"
   | "error";
 
 export interface MembershipRow {
@@ -65,7 +71,12 @@ export interface MembershipResult {
   rows: MembershipRow[];
   groups: MembershipGroupResult[];
   counts: Record<MembershipStatus, number>;
+  /** The receiving tenant's groups, by name, for picking a destination group. */
+  destGroups: Array<{ id: string; name: string; type?: string }>;
 }
+
+/** Destination group per device (by its ID on the sending tenant): a group ID, or null to leave it out. */
+export type MembershipChoices = Record<string, string | null>;
 
 export class JobNotFoundError extends Error {}
 
@@ -74,9 +85,10 @@ const nameKey = (n: string | undefined) => String(n ?? "").trim().toLowerCase();
 
 export async function restoreGroupMembership(
   localJobId: string,
-  opts: { dryRun?: boolean } = {},
+  opts: { dryRun?: boolean; choices?: MembershipChoices } = {},
 ): Promise<MembershipResult> {
   const dryRun = opts.dryRun === true;
+  const choices = opts.choices ?? {};
   const job = await getJob(localJobId);
   if (!job) throw new JobNotFoundError(`migration job ${localJobId} not found`);
 
@@ -123,6 +135,7 @@ export async function restoreGroupMembership(
   // 3. Destination groups and their current members.
   const destGroups = await listAllGroups(to.client, to.tenantId);
   const destGroupByName = new Map(destGroups.map((g) => [nameKey(g.name), g]));
+  const destGroupById = new Map(destGroups.map((g) => [g.id, g]));
   const membersCache = new Map<string, Set<string>>();
   const membersOf = async (groupId: string) => {
     if (!membersCache.has(groupId)) {
@@ -147,22 +160,37 @@ export async function restoreGroupMembership(
       rows.push({ ...base, status: "not-moved", message: status ? `still ${status}` : "no status yet" });
       continue;
     }
-    if (group === undefined) {
-      rows.push({ ...base, status: "no-group", message: "no group was recorded for this device" });
-      continue;
-    }
-    if (group === null) {
-      rows.push({ ...base, status: "no-group", message: "the device was not in a group" });
-      continue;
-    }
     if (!st?.newId) {
       rows.push({ ...base, status: "no-new-id", message: "the job did not return the device's new ID" });
       continue;
     }
-    const dest = destGroupByName.get(nameKey(group.name));
-    if (!dest) {
-      rows.push({ ...base, status: "group-missing", message: `no group named "${group.name}" on the destination; mirror it on the Groups page first` });
+    // A group picked for this device, or the one with its source group's name.
+    const choice = Object.prototype.hasOwnProperty.call(choices, id) ? choices[id] : undefined;
+    if (choice === null) {
+      rows.push({ ...base, status: "left-out", message: "left out: not added to a group" });
       continue;
+    }
+    let dest: (typeof destGroups)[number] | undefined;
+    if (choice) {
+      dest = destGroupById.get(choice);
+      if (!dest) {
+        rows.push({ ...base, status: "group-missing", message: "the group picked is not on the destination any more; pick another" });
+        continue;
+      }
+    } else {
+      if (group === undefined) {
+        rows.push({ ...base, status: "no-group", message: "no group was recorded for this device; pick a destination group to add it" });
+        continue;
+      }
+      if (group === null) {
+        rows.push({ ...base, status: "no-group", message: "the device was in no group on the sending tenant; pick a destination group to add it" });
+        continue;
+      }
+      dest = destGroupByName.get(nameKey(group.name));
+      if (!dest) {
+        rows.push({ ...base, status: "group-missing", message: `no group named "${group.name}" on the destination; pick one, or mirror it on the Groups page first` });
+        continue;
+      }
     }
     const members = await membersOf(dest.id);
     if (members.has(st.newId)) {
@@ -176,7 +204,7 @@ export async function restoreGroupMembership(
   const plan = new Map<string, MembershipGroupResult>();
   for (const r of rows) {
     if (r.status !== "will-add" || !r.destGroupId || !r.newId) continue;
-    const entry = plan.get(r.destGroupId) ?? { name: r.sourceGroup ?? "", destGroupId: r.destGroupId, ids: [], ok: null };
+    const entry = plan.get(r.destGroupId) ?? { name: destGroupById.get(r.destGroupId)?.name ?? "", destGroupId: r.destGroupId, ids: [], ok: null };
     entry.ids.push(r.newId);
     plan.set(r.destGroupId, entry);
   }
@@ -262,9 +290,12 @@ export async function restoreGroupMembership(
   }
 
   const counts = Object.fromEntries(
-    (["will-add", "added", "already-member", "no-group", "group-missing", "not-moved", "move-failed", "no-new-id", "error"] as MembershipStatus[])
+    (["will-add", "added", "already-member", "no-group", "group-missing", "not-moved", "move-failed", "no-new-id", "left-out", "error"] as MembershipStatus[])
       .map((s) => [s, rows.filter((r) => r.status === s).length]),
   ) as Record<MembershipStatus, number>;
 
-  return { localJobId, dryRun, receivingSide, rows, groups, counts };
+  const pickable = destGroups
+    .map((g) => ({ id: g.id, name: g.name, ...(g.type ? { type: g.type } : {}) }))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+  return { localJobId, dryRun, receivingSide, rows, groups, counts, destGroups: pickable };
 }

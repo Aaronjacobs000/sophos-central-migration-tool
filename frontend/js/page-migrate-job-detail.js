@@ -37,6 +37,8 @@ const state = {
   lastEventAt: 0,
   sawUnfinished: false,
   membershipPreviewed: false,
+  // Destination group picked per device (by its ID on the sending tenant): a group ID, or null to leave it out.
+  memberChoices: {},
   rows: new Map(),
   sig: {},
   wallPage: 0,
@@ -50,6 +52,7 @@ function boot() {
     return;
   }
   document.addEventListener("click", onAction);
+  document.addEventListener("change", onMemberPick);
   if (new URLSearchParams(window.location.search).get("view") === "wall") setWall(true);
   window.addEventListener("resize", () => {
     fitWall();
@@ -597,19 +600,33 @@ const MEMBERSHIP_TAG = {
   "will-add": ["tag-accent", "will add"],
   added: ["tag-ok", "added"],
   "already-member": ["tag-muted", "already in group"],
-  "no-group": ["tag-muted", "no group"],
+  "no-group": ["tag-warn", "no group"],
   "group-missing": ["tag-warn", "group missing"],
+  "left-out": ["tag-muted", "left out"],
   "not-moved": ["tag-muted", "not moved yet"],
   "move-failed": ["tag-bad", "move failed"],
   "no-new-id": ["tag-warn", "no new ID"],
   error: ["tag-bad", "failed"],
 };
 
+// Rows whose destination group can be picked: moved, with a new ID, and not yet written.
+const PICKABLE = new Set(["will-add", "already-member", "no-group", "group-missing", "left-out"]);
+
+/** A change in a row's destination group picker: remember it and preview again. */
+function onMemberPick(e) {
+  const select = e.target.closest("[data-member-pick]");
+  if (!select) return;
+  const id = select.dataset.memberPick;
+  if (select.value === "") delete state.memberChoices[id];
+  else state.memberChoices[id] = select.value === "none" ? null : select.value;
+  loadMembership(true);
+}
+
 async function loadMembership(dryRun) {
   const body = document.getElementById("membership-body");
   body.innerHTML = `<p class="hint"><span class="spin"></span> ${dryRun ? "Working out which devices go where" : "Adding devices to groups"}</p>`;
   try {
-    const res = await api.post(`/api/migrate/devices/jobs/${encodeURIComponent(state.id)}/group-membership`, { dryRun });
+    const res = await api.post(`/api/migrate/devices/jobs/${encodeURIComponent(state.id)}/group-membership`, { dryRun, choices: state.memberChoices });
     renderMembership(res);
     return res;
   } catch (err) {
@@ -620,7 +637,7 @@ async function loadMembership(dryRun) {
 
 async function applyMembership() {
   const toAdd = document.getElementById("membership-apply").dataset.count;
-  if (!confirm(`Add ${toAdd} moved device(s) to their destination groups?\n\nThis writes to the receiving tenant.`)) return;
+  if (!confirm(`Add ${toAdd} moved device(s) to the destination groups shown?\n\nThis writes to the receiving tenant.`)) return;
   const res = await loadMembership(false);
   if (!res) return;
   const failed = res.counts.error ?? 0;
@@ -636,26 +653,50 @@ function renderMembership(res) {
   const parts = [];
   if (res.dryRun && willAdd) parts.push(`<span class="tag tag-accent">${willAdd} to add</span>`);
   if (c.added) parts.push(`<span class="tag tag-ok">${c.added} added</span>`);
-  if (c["group-missing"]) parts.push(`<span class="tag tag-warn">${c["group-missing"]} group missing</span>`);
+  const unplaced = (c["group-missing"] ?? 0) + (c["no-group"] ?? 0);
+  if (unplaced) parts.push(`<span class="tag tag-warn">${unplaced} need${unplaced === 1 ? "s" : ""} a group</span>`);
   if (c.error) parts.push(`<span class="tag tag-bad">${c.error} failed</span>`);
   document.getElementById("membership-summary").innerHTML = parts.join(" ");
 
+  const groups = res.destGroups ?? [];
+  const groupName = (id) => groups.find((g) => g.id === id)?.name;
   const rows = res.rows.map((r) => {
     const [cls, label] = MEMBERSHIP_TAG[r.status] ?? ["tag-muted", r.status];
+    const dest = r.newId && PICKABLE.has(r.status)
+      ? groupPicker(r, groups)
+      : r.destGroupId ? esc(groupName(r.destGroupId) ?? r.destGroupId) : `<span class="hint">none</span>`;
     return `
       <tr>
         <td><span class="cell-name">${esc(r.hostname)}</span></td>
         <td>${r.sourceGroup ? esc(r.sourceGroup) : `<span class="hint">none</span>`}</td>
+        <td>${dest}</td>
         <td><span class="tag ${cls}">${esc(label)}</span></td>
         <td><span class="hint">${esc(r.message || "")}</span></td>
       </tr>`;
   }).join("");
   document.getElementById("membership-body").innerHTML = `
-    <table class="data-table">
-      <thead><tr><th>Device</th><th>Source group</th><th>Status</th><th>Detail</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead><tr><th>Device</th><th>Source group</th><th>Destination group</th><th>Status</th><th>Detail</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
     <p class="hint check-foot">${res.dryRun ? "Preview only. Nothing was written." : "Each group change is in data/audit.log."}</p>`;
+}
+
+/**
+ * The destination group picker for one row: the receiving tenant's groups,
+ * starting on the group the server matched by name. With no match it shows
+ * "Pick a group", marked, so the device is not added until one is picked.
+ */
+function groupPicker(r, groups) {
+  const value = r.status === "left-out" ? "none" : r.destGroupId ?? "";
+  const options = [
+    value ? "" : `<option value="" selected>Pick a group</option>`,
+    `<option value="none"${value === "none" ? " selected" : ""}>Don't add</option>`,
+    ...groups.map((g) => `<option value="${escAttr(g.id)}"${g.id === value ? " selected" : ""}>${esc(g.name)}${g.type === "server" ? " (servers)" : ""}</option>`),
+  ].join("");
+  return `<select class="member-pick${value ? "" : " is-warn"}" data-member-pick="${escAttr(r.endpointId)}" aria-label="Destination group for ${escAttr(r.hostname)}">${options}</select>`;
 }
 
 boot();
