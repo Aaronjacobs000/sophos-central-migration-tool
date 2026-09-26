@@ -35,9 +35,10 @@ async function boot() {
     const res = await api.get(url);
     state.sourcePolicy = res.sourcePolicy;
     state.destPolicy = res.destPolicy;
+    // The server's copy of the settings names web profiles instead of each tenant's ID for them.
     state.entries = flattenForCompare(
-      res.sourcePolicy?.settings ?? {},
-      res.destPolicy?.settings ?? {},
+      res.settings?.source ?? res.sourcePolicy?.settings ?? {},
+      res.settings?.dest ?? res.destPolicy?.settings ?? {},
     );
     renderHeader();
     renderBody();

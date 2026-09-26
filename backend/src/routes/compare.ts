@@ -150,10 +150,17 @@ compareRouter.get("/compare/policies/:sourceId/:destId?", async (req, res, next)
     }
 
     const fullDest = await getPolicy(dst.client, dst.tenantId, destPolicy.id);
-    const changes = diff(sourcePolicy.settings ?? {}, fullDest.settings ?? {});
+    const [srcSettings, dstSettings] = await withProfileNames(
+      sourcePolicy.settings ?? {},
+      fullDest.settings ?? {},
+      () => webProfileNames(src, dst),
+    );
+    const changes = diff(srcSettings, dstSettings);
     res.json({
       sourcePolicy,
       destPolicy: fullDest,
+      // The settings as compared: web profile IDs swapped for profile names.
+      settings: { source: srcSettings, dest: dstSettings },
       changes,
       summary: summarize(changes),
     });
@@ -321,11 +328,7 @@ export async function computeDeepMatch(): Promise<DeepPolicyMatchResult> {
   // Web filtering profile names on both sides, looked up at most once per run
   // and only when a policy refers to a profile.
   let profileNamesPromise: Promise<[Map<string, string>, Map<string, string>]> | undefined;
-  const profileNames = () =>
-    (profileNamesPromise ??= Promise.all([
-      profileNamesById(src, "source"),
-      profileNamesById(dst, "dest"),
-    ]));
+  const profileNames = () => (profileNamesPromise ??= webProfileNames(src, dst));
 
   // Concurrency-limited deep fetch + diff for the matched pairs.
   const queue = [...matchedPairs];
@@ -335,13 +338,11 @@ export async function computeDeepMatch(): Promise<DeepPolicyMatchResult> {
         getPolicy(src.client, src.tenantId, pair.src.id),
         getPolicy(dst.client, dst.tenantId, pair.dst.id),
       ]);
-      let srcSettings = srcFull.settings ?? {};
-      let dstSettings = dstFull.settings ?? {};
-      if (refersToWebProfile(srcSettings) || refersToWebProfile(dstSettings)) {
-        const [srcNames, dstNames] = await profileNames();
-        srcSettings = webProfilesByName(srcSettings, srcNames);
-        dstSettings = webProfilesByName(dstSettings, dstNames);
-      }
+      const [srcSettings, dstSettings] = await withProfileNames(
+        srcFull.settings ?? {},
+        dstFull.settings ?? {},
+        profileNames,
+      );
       const settingsChanges = diff(srcSettings, dstSettings);
       // Priority is left out: a clone lands at the bottom of the
       // destination's order, so its priority differs by design.
@@ -422,9 +423,9 @@ export async function computeDeepMatch(): Promise<DeepPolicyMatchResult> {
 }
 
 /**
- * A tenant's web filtering profile names by ID, trimmed and lower-cased the
- * way the policy migrator matches them. A failed lookup gives an empty map,
- * so that side's IDs are compared as they are and still show as a change.
+ * A tenant's web filtering profile names by ID. A failed lookup gives an
+ * empty map, so that side's IDs are compared as they are and still show as a
+ * change.
  */
 async function profileNamesById(
   ctx: TenantContext,
@@ -432,7 +433,7 @@ async function profileNamesById(
 ): Promise<Map<string, string>> {
   try {
     const profiles = await listProfiles(ctx.client, ctx.tenantId);
-    return new Map(profiles.map((p) => [p.id, p.name.trim().toLowerCase()]));
+    return new Map(profiles.map((p) => [p.id, p.name]));
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.emit(
@@ -443,6 +444,37 @@ async function profileNamesById(
     );
     return new Map();
   }
+}
+
+/**
+ * Both tenants' profile names by ID, with one name for each profile. Names
+ * match trimmed and in any case, the way the policy migrator maps them, and
+ * a profile on both sides shows the source's name on each, so a correct clone
+ * reads the same on both.
+ */
+async function webProfileNames(
+  src: TenantContext,
+  dst: TenantContext,
+): Promise<[Map<string, string>, Map<string, string>]> {
+  const [s, d] = await Promise.all([profileNamesById(src, "source"), profileNamesById(dst, "dest")]);
+  const key = (name: string) => name.trim().toLowerCase();
+  const shown = new Map<string, string>();
+  for (const name of [...s.values(), ...d.values()]) {
+    if (!shown.has(key(name))) shown.set(key(name), name.trim());
+  }
+  const named = (m: Map<string, string>) => new Map([...m].map(([id, name]) => [id, shown.get(key(name))!]));
+  return [named(s), named(d)];
+}
+
+/** Both policies' settings with web profile IDs swapped for names, when either names a profile. */
+async function withProfileNames(
+  srcSettings: Record<string, unknown>,
+  dstSettings: Record<string, unknown>,
+  names: () => Promise<[Map<string, string>, Map<string, string>]>,
+): Promise<[Record<string, unknown>, Record<string, unknown>]> {
+  if (!refersToWebProfile(srcSettings) && !refersToWebProfile(dstSettings)) return [srcSettings, dstSettings];
+  const [srcNames, dstNames] = await names();
+  return [webProfilesByName(srcSettings, srcNames), webProfilesByName(dstSettings, dstNames)];
 }
 
 const isWebProfileKey = (key: string) =>
@@ -470,8 +502,7 @@ function webProfilesByName(
 ): Record<string, unknown> {
   const swap = (v: unknown): unknown => {
     if (typeof v === "string") {
-      const name = nameById.get(v);
-      return name === undefined ? v : `web profile "${name}"`;
+      return nameById.get(v) ?? v;
     }
     if (Array.isArray(v)) return v.map(swap);
     if (v && typeof v === "object") {
