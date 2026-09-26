@@ -10,7 +10,7 @@
  *
  * File operations retry on EBUSY / EPERM / EACCES: OneDrive (and other
  * cloud-sync tools) and antivirus briefly lock files, which causes transient
- * failures on Windows.
+ * failures on Windows (see safe-files.ts).
  */
 
 import { promises as fs } from "node:fs";
@@ -18,7 +18,13 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { getState } from "../state.js";
 import { log } from "../log.js";
+import { isLock, readWithBackup, saveWithBackup, type ReadFrom } from "./safe-files.js";
 import type { SophosMigrationJob } from "../sophos/types/migration.js";
+
+/** The wait before the first retry on a locked file. Tests shorten it. */
+export { setRetryDelay } from "./safe-files.js";
+
+const SECTION = "migration-store";
 
 export interface EndpointGroupRef {
   id?: string;
@@ -174,48 +180,6 @@ function backupFile(): string {
   return path.join(getState().repoRoot, "data", "migration-jobs.auto-backup.json");
 }
 
-/** Codes that indicate a transient file lock (OneDrive, antivirus, etc.). */
-const RETRYABLE_CODES = new Set(["EBUSY", "EPERM", "EACCES"]);
-const MAX_RETRIES = 5;
-let baseDelayMs = 150;
-
-/** The wait before the first retry on a locked file, doubled for each one after. Tests shorten it. */
-export function setRetryDelay(ms: number): void {
-  baseDelayMs = ms;
-}
-
-async function withRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code && RETRYABLE_CODES.has(code) && attempt < MAX_RETRIES) {
-        const delay = baseDelayMs * Math.pow(2, attempt);
-        log.emit("warn", "migration-store", `${label}: ${code}, retry ${attempt + 1}/${MAX_RETRIES} in ${delay}ms`);
-        await new Promise((r) => setTimeout(r, delay));
-        continue;
-      }
-      throw err;
-    }
-  }
-}
-
-function isLock(err: unknown): boolean {
-  const code = (err as NodeJS.ErrnoException).code;
-  return !!code && RETRYABLE_CODES.has(code);
-}
-
-/** A file's text, or null when there is no such file. */
-async function readText(file: string): Promise<string | null> {
-  try {
-    return await withRetry(`read ${path.basename(file)}`, () => fs.readFile(file, "utf8"));
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw err;
-  }
-}
-
 function parseJobs(raw: string): LocalMigrationJob[] {
   const jobs = JSON.parse(raw) as unknown;
   if (!Array.isArray(jobs)) throw new Error("not a list of jobs");
@@ -227,9 +191,6 @@ function readProblem(err: unknown): string {
   return code ? `can't be opened (${code})` : `is damaged (${err instanceof Error ? err.message : String(err)})`;
 }
 
-/** Where the jobs were read from: the jobs file, its backup, or neither (no jobs saved yet). */
-type ReadFrom = "file" | "backup" | "none";
-
 let recoveryLogged = false;
 
 /**
@@ -239,26 +200,14 @@ let recoveryLogged = false;
  * save never writes over jobs it could not read.
  */
 async function readAll(): Promise<{ jobs: LocalMigrationJob[]; from: ReadFrom }> {
-  let problem: string | null = null;
-  try {
-    const raw = await readText(jobsFile());
-    if (raw !== null) {
-      const jobs = parseJobs(raw);
-      recoveryLogged = false;
-      return { jobs, from: "file" };
-    }
-  } catch (err) {
-    problem = readProblem(err);
+  const read = await readWithBackup(jobsFile(), backupFile(), parseJobs, SECTION);
+  if (read.from === "file") {
+    recoveryLogged = false;
+    return { jobs: read.value, from: "file" };
   }
-  let backup: LocalMigrationJob[] | null = null;
-  let backupProblem: string | null = null;
-  try {
-    const raw = await readText(backupFile());
-    if (raw !== null) backup = parseJobs(raw);
-  } catch (err) {
-    backupProblem = readProblem(err);
-  }
-  if (!backup) {
+  const problem = read.fileError === undefined ? null : readProblem(read.fileError);
+  if (read.from === "none") {
+    const backupProblem = read.backupError === undefined ? null : readProblem(read.backupError);
     if (!problem && !backupProblem) return { jobs: [], from: "none" };
     throw new Error(
       `The migration jobs can't be read: data/migration-jobs.json ${problem ?? "is missing"}, ` +
@@ -267,55 +216,12 @@ async function readAll(): Promise<{ jobs: LocalMigrationJob[]; from: ReadFrom }>
   }
   if (!recoveryLogged) {
     recoveryLogged = true;
-    log.emit("warn", "migration-store", `data/migration-jobs.json ${problem ?? "is missing"}, so the ${backup.length} jobs in data/migration-jobs.auto-backup.json were used. The next save rewrites it.`);
+    log.emit("warn", SECTION, `data/migration-jobs.json ${problem ?? "is missing"}, so the ${read.value.length} jobs in data/migration-jobs.auto-backup.json were used. The next save rewrites it.`);
   }
-  return { jobs: backup, from: "backup" };
+  return { jobs: read.value, from: "backup" };
 }
 
-/** Write a file and flush it to disk. */
-async function writeFlushed(file: string, text: string): Promise<void> {
-  const handle = await fs.open(file, "w");
-  try {
-    await handle.writeFile(text, "utf8");
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-}
-
-/**
- * Save a file whole: write a temp file beside it, then rename it over the
- * file, so a crash leaves the old file or the new one and a reader never sees
- * part of one. OneDrive and antivirus can hold the file on Windows, which
- * makes the rename fail even when a write would succeed. If the rename is
- * still locked after its retries and inPlaceIsSafe() agrees, the file is
- * written in place instead, as earlier versions always did.
- */
-async function saveFile(file: string, text: string, inPlaceIsSafe: () => Promise<boolean>): Promise<void> {
-  const name = path.basename(file);
-  const temp = path.join(path.dirname(file), `.${name}.${process.pid}-${randomUUID().slice(0, 8)}.tmp`);
-  try {
-    await withRetry(`write ${name} (temp file)`, () => writeFlushed(temp, text));
-    await withRetry(`replace ${name}`, () => fs.rename(temp, file));
-    return;
-  } catch (err) {
-    await fs.rm(temp, { force: true }).catch(() => {});
-    if (!isLock(err) || !(await inPlaceIsSafe())) throw saveError(err, name);
-    log.emit("warn", "migration-store", `${name} stayed locked (${(err as NodeJS.ErrnoException).code}), so it was written in place.`);
-  }
-  try {
-    await withRetry(`write ${name}`, () => writeFlushed(file, text));
-  } catch (err) {
-    throw saveError(err, name);
-  }
-}
-
-/**
- * Save the jobs: the backup first, then the jobs file, so the backup always
- * holds the last save or a newer one. The backup is written in place only
- * while the jobs file holds a whole list, and the jobs file only once the
- * backup holds this one, so one of the two is always whole.
- */
+/** Save the jobs and their backup (see saveWithBackup in safe-files.ts). */
 async function writeAll(jobs: LocalMigrationJob[], from: ReadFrom): Promise<void> {
   const text = JSON.stringify(jobs, null, 2);
   try {
@@ -323,8 +229,7 @@ async function writeAll(jobs: LocalMigrationJob[], from: ReadFrom): Promise<void
   } catch (err) {
     throw saveError(err, "data");
   }
-  await saveFile(backupFile(), text, async () => from !== "backup");
-  await saveFile(jobsFile(), text, async () => (await readText(backupFile()).catch(() => null)) === text);
+  await saveWithBackup(jobsFile(), backupFile(), text, from, { section: SECTION, failed: (err, file) => saveError(err, path.basename(file)) });
 }
 
 /** An error that says the jobs were not saved, and for a lock, what usually holds the file. */

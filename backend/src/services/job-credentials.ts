@@ -14,6 +14,11 @@
  * folder. Copying, syncing or sharing data/ therefore does not expose a secret.
  * Anyone who can read both files as this user can decrypt them, the same trust
  * level as the plain-text .env the tool already relies on.
+ *
+ * The file is saved like the job store's (safe-files.ts): whole, with a copy in
+ * data/job-credentials.auto-backup.json that a file cut off by a crash is
+ * recovered from, and with retries while OneDrive or antivirus holds it. Both
+ * files and the temp file of a save are mode 0600, in data/.
  */
 
 import { promises as fs } from "node:fs";
@@ -21,7 +26,8 @@ import path from "node:path";
 import os from "node:os";
 import { createCipheriv, createDecipheriv, createHmac, randomBytes } from "node:crypto";
 import { getState } from "../state.js";
-import { registerSecret } from "../log.js";
+import { log, registerSecret } from "../log.js";
+import { isLock, readWithBackup, saveWithBackup, type ReadFrom } from "./safe-files.js";
 
 export type CredentialKind = "tenant" | "partner";
 
@@ -58,6 +64,13 @@ export function keyFilePath(): string {
 function vaultPath(): string {
   return path.join(getState().repoRoot, "data", "job-credentials.json");
 }
+
+function vaultBackupPath(): string {
+  return path.join(getState().repoRoot, "data", "job-credentials.auto-backup.json");
+}
+
+const SECTION = "job-credentials";
+const VAULT_MODE = 0o600;
 
 let keyPromise: Promise<Buffer> | null = null;
 let keyPromisePath: string | null = null;
@@ -108,22 +121,57 @@ function entryId(key: Buffer, kind: CredentialKind, clientId: string): string {
   return createHmac("sha256", key).update(`${kind}:${clientId}`).digest("hex").slice(0, 32);
 }
 
-async function readVault(): Promise<VaultFile> {
-  try {
-    const parsed = JSON.parse(await fs.readFile(vaultPath(), "utf8")) as VaultFile;
-    return { version: 1, entries: Array.isArray(parsed.entries) ? parsed.entries : [] };
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { version: 1, entries: [] };
-    throw err;
-  }
+function parseVault(raw: string): VaultFile {
+  const parsed = JSON.parse(raw) as VaultFile;
+  return { version: 1, entries: Array.isArray(parsed.entries) ? parsed.entries : [] };
 }
 
-async function writeVault(vault: VaultFile): Promise<void> {
+/** Why a copy of the vault can't be used. Never the parse error's text, which can quote the file. */
+function readProblem(err: unknown): string {
+  if (err === undefined) return "is missing";
+  const code = (err as NodeJS.ErrnoException).code;
+  return code ? `can't be opened (${code})` : "is damaged";
+}
+
+let recoveryLogged = false;
+
+/**
+ * The vault and where it was read from. When the file is missing or can't be
+ * read, the entries come from the backup. With neither, reading fails, so a
+ * save never writes over entries it could not read.
+ */
+async function readVault(): Promise<{ vault: VaultFile; from: ReadFrom }> {
+  const read = await readWithBackup(vaultPath(), vaultBackupPath(), parseVault, SECTION);
+  if (read.from === "file") {
+    recoveryLogged = false;
+    return { vault: read.value, from: "file" };
+  }
+  if (read.from === "none") {
+    if (read.fileError === undefined && read.backupError === undefined) return { vault: { version: 1, entries: [] }, from: "none" };
+    throw new Error(
+      `The stored job credentials can't be read: data/job-credentials.json ${readProblem(read.fileError)}, ` +
+        `and ${read.backupError === undefined ? "there is no backup" : `the backup ${readProblem(read.backupError)}`}.`,
+    );
+  }
+  if (!recoveryLogged) {
+    recoveryLogged = true;
+    log.emit("warn", SECTION, `data/job-credentials.json ${readProblem(read.fileError)}, so the ${read.value.entries.length} stored credentials in data/job-credentials.auto-backup.json were used. The next save rewrites it.`);
+  }
+  return { vault: read.value, from: "backup" };
+}
+
+async function writeVault(vault: VaultFile, from: ReadFrom): Promise<void> {
   const file = vaultPath();
   await fs.mkdir(path.dirname(file), { recursive: true });
-  await fs.writeFile(file, JSON.stringify(vault, null, 2), { encoding: "utf8", mode: 0o600 });
-  // mode only applies when the file is created.
-  await fs.chmod(file, 0o600).catch(() => {});
+  await saveWithBackup(file, vaultBackupPath(), JSON.stringify(vault, null, 2), from, { section: SECTION, mode: VAULT_MODE, failed: saveError });
+}
+
+/** An error that says the credentials were not saved, and for a lock, what usually holds the file. */
+function saveError(err: unknown, file: string): Error {
+  const reason = isLock(err)
+    ? `data/${path.basename(file)} stayed locked (${(err as NodeJS.ErrnoException).code}), usually by OneDrive or antivirus. Try again`
+    : err instanceof Error ? err.message : String(err);
+  return new Error(`Couldn't save the job credentials: ${reason}.`, { cause: err });
 }
 
 let queue: Promise<unknown> = Promise.resolve();
@@ -151,9 +199,9 @@ export function putCredential(kind: CredentialKind, cred: ApiCredential): Promis
       tag: cipher.getAuthTag().toString("base64"),
       data: data.toString("base64"),
     };
-    const vault = await readVault();
+    const { vault, from } = await readVault();
     vault.entries = [...vault.entries.filter((e) => e.id !== id), entry];
-    await writeVault(vault);
+    await writeVault(vault, from);
     return id;
   });
 }
@@ -165,7 +213,7 @@ export function putCredential(kind: CredentialKind, cred: ApiCredential): Promis
  */
 export async function getCredential(id: string): Promise<(ApiCredential & { kind: CredentialKind }) | null> {
   // Queued behind saves, which rewrite the file: a read mid-save gets half of it.
-  const entry = await serial(async () => (await readVault()).entries.find((e) => e.id === id));
+  const entry = await serial(async () => (await readVault()).vault.entries.find((e) => e.id === id));
   if (!entry) return null;
   const key = await loadKey(false);
   if (!key) throw new CredentialUnreadableError("The key for the stored credentials is missing on this computer.");
@@ -185,10 +233,10 @@ export async function getCredential(id: string): Promise<(ApiCredential & { kind
 /** Drop every entry no job refers to. Returns how many were removed. */
 export function pruneCredentials(inUse: Set<string>): Promise<number> {
   return serial(async () => {
-    const vault = await readVault();
+    const { vault, from } = await readVault();
     const keep = vault.entries.filter((e) => inUse.has(e.id));
     const removed = vault.entries.length - keep.length;
-    if (removed > 0) await writeVault({ version: 1, entries: keep });
+    if (removed > 0) await writeVault({ version: 1, entries: keep }, from);
     return removed;
   });
 }

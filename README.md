@@ -174,6 +174,7 @@ data/                            # Created at run time, not committed
   migration-jobs.json            # Local migration jobs
   migration-jobs.auto-backup.json # Copy saved with each job save, to recover a damaged jobs file
   job-credentials.json           # Each job's credentials, encrypted (key kept outside the repo)
+  job-credentials.auto-backup.json # Copy saved with each credential save, to recover a damaged file
   audit.log                      # Copies, clones, deletes and migrations
 
 .env                             # Not committed, managed by the UI
@@ -190,7 +191,7 @@ data/                            # Created at run time, not committed
 - The API never returns secrets. The credentials page shows masked values.
 - A device move's handshake token is used once, for the sender trigger. It is not saved in `data/migration-jobs.json`, and the Logs page, `/api/logs` and error messages mask it.
 - Each migration job stores the credentials it needs to check its progress later, so it keeps working after the tool is pointed at other tenants:
-  - They are encrypted with AES-256-GCM in `data/job-credentials.json`. There is one entry per API credential, shared by every job that used it, and jobs refer to it by an opaque ID.
+  - They are encrypted with AES-256-GCM in `data/job-credentials.json`, with a copy in `data/job-credentials.auto-backup.json` (both mode 0600). There is one entry per API credential, shared by every job that used it, and jobs refer to it by an opaque ID.
   - The 256-bit key is created on first use in `~/.sophos-tenant-migration-tool/job-credentials.key` (mode 0600, in a 0700 folder), outside the repo, so copying, syncing or sharing the repo or `data/` does not expose a secret. On Windows that is `%USERPROFILE%\.sophos-tenant-migration-tool\job-credentials.key`. Set `JOB_CREDENTIALS_KEY_FILE` to keep the key somewhere else.
   - No route returns them, and the job page and `/api/migrate/devices/jobs` only say whether they are stored. They are masked in logs and error messages.
   - Limits: anyone who can read both the key and `data/` as your user can decrypt them, the same trust as the plain-text `.env`. On Windows the file modes are not enforced, so rely on the user profile's own permissions. If the key is lost (another computer, or the file deleted), jobs say their credentials can't be read, and you can attach them again.
