@@ -20,6 +20,7 @@ import {
   listBlockedItems,
 } from "../sophos/api/exclusions.js";
 import { listAllEndpoints } from "../sophos/api/endpoints.js";
+import { clearDeepMatchCache } from "../routes/compare.js";
 import { log } from "../log.js";
 
 export type SectionId =
@@ -176,6 +177,7 @@ async function fetchSection(side: TenantLabel, section: SectionId): Promise<void
  */
 export function startPreload(): void {
   resetPreloadCache();
+  clearDeepMatchCache();
   log.emit("info", "preload", "starting full preload (both sides)");
   const tasks: Promise<void>[] = [];
   for (const side of ["source", "dest"] as TenantLabel[]) {
@@ -190,12 +192,15 @@ export function startPreload(): void {
 
 /**
  * Refresh a single section/side combination on demand (e.g. user clicked
- * a refresh button on the dashboard).
+ * a refresh button on the dashboard). Reloading policies also drops the deep
+ * policy match, which pages call it after a write, so the Policies page
+ * compares again instead of showing the comparison from before the write.
  */
 export async function refreshSection(
   side: TenantLabel,
   section: SectionId,
 ): Promise<SectionStatus> {
+  if (section === "policies") clearDeepMatchCache();
   await fetchSection(side, section);
   return cache[side][section].status;
 }

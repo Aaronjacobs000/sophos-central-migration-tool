@@ -265,13 +265,16 @@ compareRouter.get("/compare/policies/deep", async (req, res, next) => {
     }
 
     const promise = computeDeepMatch();
-    deepMatchCache = { key: cacheKey, inFlight: promise, result: null };
+    const entry = { key: cacheKey, inFlight: promise, result: null };
+    deepMatchCache = entry;
+    // Cache the result only if nothing cleared the cache while it ran: a
+    // write in the meantime makes it stale.
     try {
       const result = await promise;
-      deepMatchCache = { key: cacheKey, inFlight: null, result };
+      if (deepMatchCache === entry) deepMatchCache = { key: cacheKey, inFlight: null, result };
       res.json(result);
     } catch (err) {
-      deepMatchCache = null;
+      if (deepMatchCache === entry) deepMatchCache = null;
       throw err;
     }
   } catch (err) {
