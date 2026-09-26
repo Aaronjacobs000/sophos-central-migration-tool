@@ -41,3 +41,13 @@ test("two jobs keep their own names on the list, the merged list and the job det
   }
   assert.equal((await http.get(`/api/migrate/devices/jobs/${b.localJobId}`)).body.jobName, "Finance laptops, wave 2");
 });
+
+test("the Migrations list links each job by name with its route, and the monitor puts the name in its title", async () => {
+  const list = await readFile(new URL("../frontend/js/page-migrate-jobs.js", import.meta.url), "utf8");
+  const monitor = await readFile(new URL("../frontend/js/page-migrate-job-detail.js", import.meta.url), "utf8");
+  const form = await readFile(new URL("../frontend/migrate.html", import.meta.url), "utf8");
+  assert.match(form, /name="jobName" required/);
+  assert.match(list, /escapeHtml\(j\.jobName\)}<\/a>\$\{route\}/);
+  assert.match(monitor, /getElementById\("job-title"\)\.textContent = job\.jobName/);
+  assert.match(monitor, /document\.title = `\$\{p\.percent\}% · \$\{job\.jobName\}/);
+});

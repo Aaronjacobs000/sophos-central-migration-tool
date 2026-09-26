@@ -14,52 +14,62 @@
   <div class="shell-main">
   <header id="app-nav" class="topbar"></header>
 
-  <main class="page-main">
-    <h1 id="job-title">Migration job</h1>
-    <p class="page-lead" id="job-lead">Loading</p>
-
-    <div id="job-warnings"></div>
-
-    <section class="panel-card">
-      <div class="card-head">
-        <h2>Progress</h2>
-        <span id="job-status"></span>
-        <span class="spacer"></span>
-        <button id="refresh-btn" class="btn btn-small"><span data-icon="refresh"></span>Refresh now</button>
+  <main class="page-main monitor-page">
+    <section class="panel-card monitor-hero">
+      <div class="monitor-main">
+        <div class="monitor-top">
+          <span class="eyebrow">Device migration</span>
+          <span id="job-status"></span>
+        </div>
+        <h1 id="job-title">Migration job</h1>
+        <div class="monitor-route" id="job-route"></div>
+        <p class="monitor-lead" id="job-lead">Loading</p>
+        <div class="monitor-counts" id="job-counts"></div>
+        <div class="monitor-live">
+          <span class="live-line" id="job-live"><span class="conn-dot" data-state="unconfigured"></span><span>Connecting</span></span>
+          <span class="spacer"></span>
+          <button type="button" class="btn btn-small" data-action="check-now" id="check-now-btn"><span data-icon="refresh"></span>Check now</button>
+          <button type="button" class="btn btn-small" data-action="wall" id="wall-btn"><span data-icon="monitor"></span><span class="wall-label">Wall view</span></button>
+        </div>
       </div>
-      <p class="card-sub" id="no-cancel-note">A started migration can't be cancelled. The Sophos migrations API has no
-        cancel or delete, so the move runs to the end. A receiving job that the sending tenant never picks up stays
-        listed until it expires, 14 days after it was created.</p>
-      <div id="job-progress"></div>
-      <div id="job-meta"></div>
+      <div class="monitor-ring" id="job-ring"></div>
     </section>
 
-    <section class="panel-card">
-      <div class="card-head">
-        <h2>Devices</h2>
-        <span class="hint">Live status, polled every 10 seconds</span>
-      </div>
-      <p class="card-sub">Sophos hands each device over within seconds. The device moves when it next checks in to the
-        receiving tenant, under a new ID; in testing that took about 24 minutes. Check-in shows when each device arrives,
-        and the page keeps polling until every device has checked in.</p>
-      <div id="endpoint-grid"></div>
+    <div id="job-alerts" class="monitor-alerts"></div>
+
+    <section class="panel-card lanes-card">
+      <div class="lanes-head" id="lanes-head"></div>
+      <div class="lanes" id="lanes"><div class="empty-state">Loading</div></div>
+      <div class="lanes-foot" id="lanes-foot" hidden></div>
     </section>
 
-    <section class="panel-card" id="membership-card">
-      <div class="card-head">
-        <h2><span data-icon="folders"></span>Group membership</h2>
-        <span id="membership-summary"></span>
-        <span class="spacer"></span>
-        <button id="membership-preview" class="btn btn-small">Preview</button>
-        <button id="membership-apply" class="btn btn-small btn-primary" disabled>Add to groups</button>
-      </div>
-      <p class="card-sub">Adds each moved device to the destination group with the same name as its group on the sending
-        tenant, so policies assigned to that group follow it. Devices already in the group are skipped. Mirror missing
-        groups on the <a href="/groups.html">Groups</a> page first.</p>
-      <div id="membership-body"><div class="empty-state">Available once devices have moved.</div></div>
-    </section>
+    <div class="monitor-more">
+      <section class="panel-card" id="details-card">
+        <div class="card-head">
+          <h2>Job details</h2>
+        </div>
+        <div id="job-meta"></div>
+        <p class="card-sub monitor-note" id="no-cancel-note">A started migration can't be cancelled. The Sophos migrations API has no
+          cancel or delete, so the move runs to the end. A receiving job that the sending tenant never picks up stays
+          listed until it expires, 14 days after it was created.</p>
+      </section>
 
-    <section class="panel-card">
+      <section class="panel-card" id="membership-card">
+        <div class="card-head">
+          <h2><span data-icon="folders"></span>Group membership</h2>
+          <span id="membership-summary"></span>
+          <span class="spacer"></span>
+          <button id="membership-preview" class="btn btn-small" data-action="membership-preview">Preview</button>
+          <button id="membership-apply" class="btn btn-small btn-primary" data-action="membership-apply" disabled>Add to groups</button>
+        </div>
+        <p class="card-sub">Adds each moved device to the destination group with the same name as its group on the sending
+          tenant, so policies assigned to that group follow it. Devices already in the group are skipped. Mirror missing
+          groups on the <a href="/groups.html">Groups</a> page first.</p>
+        <div id="membership-body"><div class="empty-state">Available once devices have moved.</div></div>
+      </section>
+    </div>
+
+    <section class="panel-card monitor-upstream">
       <h2>Upstream jobs</h2>
       <div id="api-status" class="api-grid"></div>
     </section>

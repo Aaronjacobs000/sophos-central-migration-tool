@@ -289,15 +289,16 @@ function renderJourney(data) {
   } else if (data.jobs.length === 0) {
     verify = { state: "muted", tag: "No moves yet", lines: ["Jobs started from this tool appear here."] };
   } else {
-    const count = (st) => data.jobs.filter((j) => j.status === st).length;
-    const running = count("in-progress");
-    const done = count("complete");
-    const failed = count("failed") + count("partially-complete");
+    // Statuses come from the server: requested, in-progress, completed, completed-with-failures, failed.
+    const count = (...st) => data.jobs.filter((j) => st.includes(j.status)).length;
+    const running = count("requested", "in-progress");
+    const done = count("completed");
+    const failed = count("failed", "completed-with-failures");
     verify = {
       state: failed ? "bad" : running ? "warn" : "ok",
-      tag: running ? `${running} in progress` : failed ? `${failed} need a look` : "All complete",
+      tag: running ? `${running} in progress` : failed ? `${failed} need a look` : "All completed",
       lines: [
-        `<b>${data.jobs.length}</b> ${data.jobs.length === 1 ? "job" : "jobs"}: ${done} complete, ${running} in progress${failed ? `, ${failed} with failures` : ""}`,
+        `<b>${data.jobs.length}</b> ${data.jobs.length === 1 ? "job" : "jobs"}: ${done} completed, ${running} in progress${failed ? `, ${failed} with failures` : ""}`,
       ],
     };
   }

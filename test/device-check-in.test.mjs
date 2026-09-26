@@ -119,10 +119,11 @@ test("a move back reads the source tenant, which is then the receiving side", as
   assert.deepEqual(endpointLookups().map((c) => c.tenant), ["src"]);
 });
 
-test("the job page shows a Check-in column and does not call a waiting job complete", async () => {
+test("the job page shows each device's check-in and does not call a waiting job complete", async () => {
   const js = await readFile(new URL("../frontend/js/page-migrate-job-detail.js", import.meta.url), "utf8");
-  assert.match(js, /<th>Check-in<\/th>/);
-  assert.match(js, /checkInCell\(job\.checkIns\?\.\[m\.id\]\)/);
-  assert.match(js, /getElementById\("job-status"\)\.innerHTML = jobStatusTag\(job\)/);
-  assert.match(js, /waiting for check-in/);
+  // One row per device from the server's progress, which counts a device arrived only once it has checked in.
+  assert.match(js, /job\.progress\.devices/);
+  assert.match(js, /Waiting for check-in/);
+  assert.match(js, /checked in by/);
+  assert.match(js, /setHtml\("job-status", statusTag\(job\.status/);
 });

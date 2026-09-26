@@ -1,114 +1,597 @@
+// Migration job monitor. Sending tenant on the left, receiving tenant on the
+// right, one row per requested device, and a progress ring for the share that
+// has arrived. Built to be left open on a screen: it follows the server's
+// event stream (the server sets the pace and stops once the job has finished),
+// reconnects if the stream drops, and redraws only the rows that changed.
+
 import "./nav.js";
 import { api } from "./api.js";
 import { toast } from "./toast.js";
 import { icon } from "./icons.js";
-import { esc as escHtml } from "./ui.js";
+import { esc, escAttr } from "./ui.js";
+import {
+  statusTag,
+  statusLabel,
+  progressRing,
+  formatWait,
+  formatWhen,
+  formatDate,
+  jobSides,
+  accessProblem,
+} from "./migration-view.js";
 
-let currentJob = null;
-let eventSource = null;
+const WAIT_NOTE_MS = 2 * 60 * 60 * 1000;
+const STALE_GRACE_MS = 90_000;
+const RECONNECT_MS = 30_000;
+// Wall view shows as many devices as fit and turns to the next set on this beat.
+const WALL_PAGE_MS = 12_000;
 
-async function boot() {
-  const params = new URLSearchParams(window.location.search);
-  const id = params.get("id");
-  if (!id) {
-    document.getElementById("job-meta").innerHTML =
-      `<div class="banner banner-err">Missing job id.</div>`;
+const state = {
+  id: null,
+  job: null,
+  es: null,
+  reconnectTimer: null,
+  finished: false,
+  streamDown: false,
+  nextCheckAt: null,
+  lastEventAt: 0,
+  sawUnfinished: false,
+  membershipPreviewed: false,
+  rows: new Map(),
+  sig: {},
+  wallPage: 0,
+};
+
+function boot() {
+  state.id = new URLSearchParams(window.location.search).get("id");
+  if (!state.id) {
+    document.getElementById("job-lead").textContent = "";
+    document.getElementById("job-alerts").innerHTML = `<div class="banner banner-err">Missing job id.</div>`;
     return;
   }
-
-  document.getElementById("refresh-btn").addEventListener("click", () => manualRefresh(id));
-  document.getElementById("membership-preview").addEventListener("click", () => loadMembership(id, true));
-  document.getElementById("membership-apply").addEventListener("click", () => applyMembership(id));
-
-  connectStream(id);
+  document.addEventListener("click", onAction);
+  if (new URLSearchParams(window.location.search).get("view") === "wall") setWall(true);
+  window.addEventListener("resize", () => {
+    fitWall();
+    layoutWall();
+  });
+  connect();
+  setInterval(tick, 1000);
+  setInterval(() => {
+    if (!document.body.classList.contains("is-wall")) return;
+    state.wallPage++;
+    layoutWall();
+  }, WALL_PAGE_MS);
 }
 
-function connectStream(id) {
-  if (eventSource) eventSource.close();
-  eventSource = new EventSource(`/api/migrate/devices/jobs/${encodeURIComponent(id)}/stream`);
-  eventSource.addEventListener("status", (e) => {
+// ---------- live stream ----------
+
+function connect() {
+  if (state.reconnectTimer) {
+    clearTimeout(state.reconnectTimer);
+    state.reconnectTimer = null;
+  }
+  if (state.es) state.es.close();
+  state.finished = false;
+  const es = new EventSource(`/api/migrate/devices/jobs/${encodeURIComponent(state.id)}/stream`);
+  state.es = es;
+  es.addEventListener("status", (e) => {
     try {
-      currentJob = JSON.parse(e.data);
-      render(currentJob);
+      const job = JSON.parse(e.data);
+      state.streamDown = false;
+      state.lastEventAt = Date.now();
+      state.nextCheckAt = job.nextCheckAt ?? null;
+      apply(job);
     } catch (err) {
-      console.error("bad SSE payload", err);
+      console.error("bad status event", err);
     }
   });
-  eventSource.addEventListener("done", (e) => {
-    try {
-      const data = JSON.parse(e.data);
-      toast(data.status === "complete" ? "Migration complete. Every device has checked in." : `Migration ${data.status ?? "finished"}.`, data.status === "complete" ? "ok" : "info");
-    } catch {}
-    eventSource.close();
+  es.addEventListener("done", () => {
+    es.close();
+    if (state.es === es) state.es = null;
+    state.finished = true;
+    state.nextCheckAt = null;
+    const job = state.job;
+    if (job && state.sawUnfinished) {
+      const ok = job.status === "completed";
+      toast(ok ? "Migration completed. Every device has checked in." : `Migration finished: ${statusLabel(job.status).toLowerCase()}.`, ok ? "ok" : "info", 8000);
+    }
+    renderLive();
   });
-  eventSource.addEventListener("error", () => {
-    toast("Live updates interrupted, retrying…", "info");
+  es.addEventListener("error", (e) => {
+    // The server sends "error" events for a failed check; the browser sends one when the connection drops.
+    if (e.data) return;
+    if (state.finished) return;
+    state.streamDown = true;
+    renderLive();
+    if (es.readyState === EventSource.CLOSED) {
+      if (state.es === es) state.es = null;
+      scheduleReconnect();
+    }
   });
 }
 
-async function manualRefresh(id) {
-  const btn = document.getElementById("refresh-btn");
+function scheduleReconnect() {
+  if (state.reconnectTimer || state.finished) return;
+  state.reconnectTimer = setTimeout(() => {
+    state.reconnectTimer = null;
+    connect();
+  }, RECONNECT_MS);
+}
+
+// Once a second: countdowns, wait times, and a watchdog for a stream that went quiet.
+function tick() {
+  if (!state.job) return;
+  renderLive();
+  for (const el of document.querySelectorAll("[data-wait-since]")) {
+    el.textContent = formatWait(Date.now() - Date.parse(el.dataset.waitSince));
+  }
+  if (!state.finished && state.nextCheckAt && Date.now() > Date.parse(state.nextCheckAt) + STALE_GRACE_MS) {
+    state.streamDown = true;
+    state.nextCheckAt = null;
+    connect();
+  }
+}
+
+function apply(job) {
+  state.job = job;
+  if (!job.progress.finished) state.sawUnfinished = true;
+  render(job);
+}
+
+// ---------- rendering ----------
+
+function render(job) {
+  const p = job.progress;
+  const sides = jobSides(job);
+  const problem = accessProblem(job);
+  document.title = `${p.percent}% · ${job.jobName} · Migration job`;
+  document.getElementById("job-title").textContent = job.jobName;
+  setHtml("job-status", statusTag(job.status, { large: true, paused: !checkable(job) }));
+  const sideCls = (s) => `side-title${s.key === "dest" ? " is-dest" : ""}`;
+  setHtml("job-route", `
+    <span class="${sideCls(sides.sending)}">${esc(sides.sending.name)}</span>
+    ${icon("arrowRight", "ico route-arrow")}
+    <span class="${sideCls(sides.receiving)}">${esc(sides.receiving.name)}</span>`);
+  document.getElementById("job-lead").textContent =
+    `${p.total} device${p.total === 1 ? "" : "s"}, created ${new Date(job.createdAt).toLocaleString()}. ` +
+    (p.finished ? "Finished." : `Devices can check in until ${formatDate(p.expiresAt)}, when the job expires.`);
+  setHtml("job-counts", counts(p));
+  setHtml("job-ring", progressRing(p, { size: "lg", stale: problem?.tone === "bad" || job.monitor?.state === "no-credentials" || job.monitor?.state === "not-found" }));
+  renderAlerts(job);
+  renderLanesHead(job, sides);
+  renderLanes(job);
+  // While the job can't be checked, the rows are the last known state: nothing moves.
+  document.getElementById("lanes").classList.toggle("is-stale", !checkable(job));
+  layoutWall();
+  renderDetails(job);
+  renderApiStatus(job);
+  renderLive();
+
+  const moved = p.arrived + p.waiting > 0;
+  if (!state.membershipPreviewed && moved && job.monitor?.state === "ok") {
+    state.membershipPreviewed = true;
+    loadMembership(true);
+  } else if (!state.membershipPreviewed) {
+    const text = moved && !checkable(job)
+      ? "Available once this job's tenants can be checked again."
+      : "Available once devices have moved.";
+    setHtml("membership-body", `<div class="empty-state">${text}</div>`);
+  }
+}
+
+function checkable(job) {
+  return !["rejected", "no-credentials", "not-found"].includes(job.monitor?.state);
+}
+
+/** Replace markup only when it changed, so running animations are not restarted. */
+function setHtml(id, html) {
+  if (state.sig[id] === html) return;
+  state.sig[id] = html;
+  document.getElementById(id).innerHTML = html;
+}
+
+function counts(p) {
+  const item = (n, label, cls) => `<div class="count-chip ${cls}${n ? "" : " is-zero"}"><b class="tnum">${n}</b><span>${label}</span></div>`;
+  return [
+    item(p.arrived, "arrived", "is-arrived"),
+    item(p.waiting, "waiting for check-in", "is-waiting"),
+    item(p.requested, "not handed over", "is-requested"),
+    item(p.failed + p.expired, "failed", "is-failed"),
+  ].join("");
+}
+
+function renderLive() {
+  const job = state.job;
+  const el = document.getElementById("job-live");
+  if (!job) return;
+  const m = job.monitor ?? {};
+  const lastOk = m.lastOkAt ? formatWhen(m.lastOkAt) : null;
+  let dot = "ok";
+  let text;
+  if (state.streamDown && !state.finished) {
+    dot = "warn";
+    text = `Lost the connection to the tool. Reconnecting.${lastOk ? ` Last update ${lastOk}.` : ""}`;
+  } else if (m.state === "rejected") {
+    dot = "error";
+    text = `Can't check: credentials rejected.${lastOk ? ` Last successful check ${lastOk}.` : ""}`;
+  } else if (m.state === "no-credentials" || m.state === "not-found") {
+    dot = "warn";
+    text = `Can't check this job.${lastOk ? ` Last successful check ${lastOk}.` : " Showing the saved state."}`;
+  } else if (m.state === "error") {
+    dot = "warn";
+    text = `Last check failed, retrying.${lastOk ? ` Last successful check ${lastOk}.` : ""}`;
+  } else if (state.finished || job.progress.finished) {
+    dot = "idle";
+    text = `Finished. Last checked ${lastOk ?? "never"}. Not checking any more.`;
+  } else {
+    text = `Live. Updated ${lastOk ?? "not yet"}`;
+  }
+  const next = !state.finished && state.nextCheckAt && !state.streamDown
+    ? Math.max(0, Math.round((Date.parse(state.nextCheckAt) - Date.now()) / 1000))
+    : null;
+  const nextText = next === null ? "" : next === 0 ? ", checking now" : `, next check in ${formatWait(next * 1000)}`;
+  const html = `<span class="conn-dot" data-state="${dot === "idle" ? "unconfigured" : dot}"></span><span>${esc(text)}${esc(dot === "ok" ? nextText : "")}</span>`;
+  if (el.innerHTML !== html) el.innerHTML = html;
+}
+
+function renderAlerts(job) {
+  const p = job.progress;
+  const m = job.monitor ?? {};
+  const saved = m.lastOkAt ? `from the last successful check, ${new Date(m.lastOkAt).toLocaleString()}` : "saved with the job";
+  const out = [];
+  const actions = (...buttons) => `<div class="alert-actions">${buttons.join("")}</div>`;
+  const btn = (action, label, primary) => `<button type="button" class="btn btn-small${primary ? " btn-primary" : ""}" data-action="${action}">${label}</button>`;
+
+  if (m.state === "rejected") {
+    out.push(alert("bad", "key", "Can't check status: credentials rejected",
+      `Sophos refused the credentials stored with this job, so its progress can't be checked. They may have been deleted or changed in Sophos Fusion. The devices below show the last known state, ${saved}.`,
+      actions(btn("attach-form", "Attach new credentials", true), btn("check-now", "Check again"))));
+  } else if (m.state === "no-credentials" || m.state === "not-found") {
+    out.push(alert("warn", "key", "Credentials not stored for this job",
+      `${esc(m.message || "The tool has no credentials for this job's tenants.")} The devices below show the state ${saved}.`,
+      actions(btn("attach-current", "Use the current connection", true), btn("attach-form", "Enter credentials"))));
+  } else if (m.state === "error") {
+    out.push(alert("warn", "alert", "The last check failed",
+      `${esc(m.message || "Sophos did not answer.")} The tool keeps trying. The devices below show the state ${saved}.`, ""));
+  } else if (!job.credentials?.stored && m.via === "current") {
+    out.push(alert("info", "info", "Credentials not stored for this job",
+      "It is checked with the tool's current connection, which points at the same tenants. Store them so the job can still be checked after the tool points at other tenants.",
+      actions(btn("attach-current", "Store credentials", true))));
+  }
+
+  if (checkable(job) && !p.finished && p.oldestWaitSince && Date.now() - Date.parse(p.oldestWaitSince) > WAIT_NOTE_MS) {
+    const long = p.devices.filter((d) => d.state === "waiting" && Date.now() - Date.parse(d.handedOverAt) > WAIT_NOTE_MS).length;
+    out.push(alert("info", "clock", `${long} device${long === 1 ? " has" : "s have"} waited over 2 hours to check in`,
+      `A device moves when it next checks in, so one that is switched off or offline waits. It can check in until ${new Date(p.expiresAt).toLocaleString()}, when the job expires.`, ""));
+  }
+  if (p.expired > 0) {
+    out.push(alert("bad", "clock", `${p.expired} device${p.expired === 1 ? "" : "s"} did not check in before the job expired`,
+      "Devices have to check in within 14 days for the move to land. Start a new migration for them once they are back online.", ""));
+  }
+  for (const [label, snap] of [["Sending", job.direction === "dest-to-source" ? job.destSnapshot : job.sourceSnapshot], ["Receiving", job.direction === "dest-to-source" ? job.sourceSnapshot : job.destSnapshot]]) {
+    const err = snap?.errorMessage || snap?.errorCode;
+    if (err) out.push(alert("bad", "alert", `${label} tenant reported an error`, esc(err), ""));
+  }
+  setHtml("job-alerts", out.join(""));
+}
+
+function alert(tone, ico, title, body, actionsHtml) {
+  return `
+    <div class="monitor-alert" data-tone="${tone}">
+      <span class="alert-ico">${icon(ico)}</span>
+      <div class="alert-body"><strong>${esc(title)}</strong><p>${body}</p></div>
+      ${actionsHtml}
+    </div>`;
+}
+
+function renderLanesHead(job, sides) {
+  const side = (s, role) => `
+    <div class="lane-tenant ${s.key === "dest" ? "is-dest" : "is-src"}">
+      <span class="lane-role">${role}</span>
+      <span class="lane-tenant-name">${esc(s.name)}</span>
+      <span class="lane-tenant-meta">${s.tenantId ? `<code title="${escAttr(s.tenantId)}">${esc(s.tenantId.slice(0, 8))}</code>` : "tenant not recorded"}${s.region ? ` · ${esc(s.region)}` : ""}</span>
+    </div>`;
+  setHtml("lanes-head", `${side(sides.sending, "From")}<div class="lane-head-mid" aria-hidden="true">${icon("arrowRight")}</div>${side(sides.receiving, "To")}`);
+}
+
+// Rows are keyed by device ID and only replaced when their content changes.
+function renderLanes(job) {
+  const lanes = document.getElementById("lanes");
+  const devices = [...job.progress.devices].sort((a, b) => a.hostname.localeCompare(b.hostname, undefined, { numeric: true }));
+  if (!devices.length) {
+    lanes.innerHTML = `<div class="empty-state">This job has no devices.</div>`;
+    state.rows.clear();
+    return;
+  }
+  lanes.dataset.density = devices.length > 14 ? "compact" : "comfortable";
+  lanes.querySelector(".empty-state")?.remove();
+  const seen = new Set();
+  let prev = null;
+  for (const d of devices) {
+    seen.add(d.id);
+    const html = laneRow(d);
+    let row = state.rows.get(d.id);
+    if (!row) {
+      row = document.createElement("div");
+      row.className = "lane-row";
+      row.dataset.id = d.id;
+      state.rows.set(d.id, row);
+    }
+    if (row.dataset.sig !== html) {
+      row.innerHTML = html;
+      row.dataset.sig = html;
+      row.dataset.state = d.state;
+    }
+    const want = prev ? prev.nextSibling : lanes.firstChild;
+    if (want !== row) lanes.insertBefore(row, want);
+    prev = row;
+  }
+  for (const [id, row] of state.rows) {
+    if (!seen.has(id)) {
+      row.remove();
+      state.rows.delete(id);
+    }
+  }
+}
+
+function laneRow(d) {
+  const oldId = `<code class="lane-id" title="${escAttr(d.id)}">${esc(d.id.slice(0, 8))}</code>`;
+  const group = d.group ? ` · ${esc(d.group)}` : "";
+  const fromTag = {
+    requested: `<span class="tag tag-muted">Requested</span>`,
+    waiting: `<span class="tag tag-accent">Handed over</span>`,
+    arrived: `<span class="tag tag-muted">Moved</span>`,
+    failed: `<span class="tag tag-bad">Not moved</span>`,
+    expired: `<span class="tag tag-bad">Not moved</span>`,
+  }[d.state];
+  const fromSub = {
+    requested: "Waiting for Sophos to hand it over",
+    waiting: d.handedOverAt ? `Handed over ${formatWhen(d.handedOverAt)}` : "Handed over",
+    arrived: "Old record stays here, offline",
+    failed: "Still on this tenant",
+    expired: "Still on this tenant",
+  }[d.state];
+
+  const newId = d.newId ? `<code class="lane-id" title="${escAttr(d.newId)}">${esc(d.newId)}</code>` : "";
+  let to;
+  if (d.state === "arrived") {
+    to = `
+      <div class="lane-dev">
+        <span class="lane-host">${esc(d.hostname)}</span>
+        <span class="lane-sub">${newId}</span>
+      </div>
+      <span class="lane-end"><span class="tag tag-ok">${icon("check")}Arrived</span><span class="lane-time">checked in by ${esc(formatWhen(d.checkedInAt))}</span></span>`;
+  } else if (d.state === "waiting") {
+    const since = d.handedOverAt ? `<span class="lane-time">waiting <b data-wait-since="${escAttr(d.handedOverAt)}">${esc(formatWait(Date.now() - Date.parse(d.handedOverAt)))}</b></span>` : "";
+    to = `
+      <div class="lane-dev is-ghost">
+        <span class="lane-host">${esc(d.hostname)}</span>
+        <span class="lane-sub">${newId ? `Registered as ${newId}` : "Registered, new ID not reported yet"}</span>
+      </div>
+      <span class="lane-end"><span class="tag tag-warn"><span class="conn-dot" data-state="loading"></span>Waiting for check-in</span>${since}</span>`;
+  } else if (d.state === "requested") {
+    to = `<span class="lane-slot">Not handed over yet</span>`;
+  } else if (d.state === "failed") {
+    to = `<span class="lane-slot is-bad">${icon("xCircle")}Move failed${d.reason ? `: ${esc(d.reason)}` : ""}</span>`;
+  } else {
+    to = `<span class="lane-slot is-bad">${icon("clock")}Did not check in before the job expired</span>`;
+  }
+
+  const mark = { arrived: icon("check"), failed: icon("x"), expired: icon("x") }[d.state] ?? "";
+  return `
+    <div class="lane-cell lane-from">
+      <div class="lane-dev">
+        <span class="lane-host">${esc(d.hostname)}</span>
+        <span class="lane-sub">${oldId}${group}</span>
+      </div>
+      <span class="lane-end">${fromTag}<span class="lane-time">${esc(fromSub)}</span></span>
+    </div>
+    <div class="lane-link" aria-hidden="true"><span class="lane-track"></span>${d.state === "waiting" ? `<span class="lane-pulse"></span>` : ""}${mark ? `<span class="lane-mark">${mark}</span>` : ""}</div>
+    <div class="lane-cell lane-to">${to}</div>`;
+}
+
+function renderDetails(job) {
+  const toSource = job.direction === "dest-to-source";
+  const c = job.credentials ?? { stored: false };
+  const finished = job.progress.finished;
+  const creds = c.stored
+    ? `<span class="tag tag-ok">${icon("lock")}Stored, encrypted</span> <span class="hint">${esc(c.mode === "partner" ? "partner credential" : "tenant credentials")}, ${esc(new Date(c.storedAt).toLocaleString())}</span>
+       <div class="cred-actions"><button type="button" class="btn btn-small btn-danger" data-action="remove-creds">Remove stored credentials</button>${finished ? `<span class="hint">This job has finished, so it no longer needs them.</span>` : ""}</div>`
+    : `<span class="tag tag-muted">Not stored</span>
+       <div class="cred-actions"><button type="button" class="btn btn-small" data-action="attach-current">Use the current connection</button><button type="button" class="btn btn-small" data-action="attach-form">Enter credentials</button></div>`;
+  setHtml("job-meta", `
+    <dl class="kv-list">
+      <dt>Name</dt><dd>${esc(job.jobName)}</dd>
+      <dt>Direction</dt><dd><span class="tag ${toSource ? "tag-dst" : "tag-src"}">${toSource ? "destination" : "source"}</span> ${icon("arrowRight")} <span class="tag ${toSource ? "tag-src" : "tag-dst"}">${toSource ? "source" : "destination"}</span></dd>
+      <dt>Migration ID</dt><dd><code>${esc(job.destMigrationId)}</code></dd>
+      <dt>Created</dt><dd>${esc(new Date(job.createdAt).toLocaleString())}</dd>
+      <dt>Expires</dt><dd>${esc(new Date(job.progress.expiresAt).toLocaleString())}</dd>
+      <dt>Credentials</dt><dd>${creds}</dd>
+      <dt>Local job ID</dt><dd><code>${esc(job.localJobId)}</code></dd>
+    </dl>`);
+}
+
+function renderApiStatus(job) {
+  setHtml("api-status", `
+    <div>
+      <h3 class="side-title">Source</h3>
+      ${renderSnapshot(job.sourceSnapshot, "source", job.sourceMigrationId)}
+    </div>
+    <div>
+      <h3 class="side-title is-dest">Destination</h3>
+      ${renderSnapshot(job.destSnapshot, "dest", job.destMigrationId)}
+    </div>`);
+}
+
+function renderSnapshot(snap, side, migrationId) {
+  if (!snap) {
+    return `<div class="banner banner-warn">No data from the ${side === "dest" ? "destination" : "source"} API yet.</div>`;
+  }
+  const counts = snap.endpointCounts || {};
+  const countsHtml = counts.total != null
+    ? `<dt>Endpoints</dt><dd>${counts.total ?? 0} total, ${counts.successful ?? 0} ok, ${counts.failed ?? 0} failed, ${counts.pending ?? 0} pending</dd>`
+    : "";
+  const errorHtml = snap.errorCode || snap.errorMessage
+    ? `<div class="banner banner-err">${snap.errorCode ? `<strong>${esc(snap.errorCode)}</strong>: ` : ""}${esc(snap.errorMessage || "Unknown error")}</div>`
+    : "";
+  const finished = snap.finishedAt ? `<dt>Finished</dt><dd>${new Date(snap.finishedAt).toLocaleString()}</dd>` : "";
+  return `
+    <dl class="kv-list">
+      <dt>Migration ID</dt><dd><code>${esc(migrationId)}</code></dd>
+      <dt>API status</dt><dd>${snap.status ? `<span class="tag tag-muted">${esc(snap.status)}</span>` : `<span class="hint">not reported</span>`}</dd>
+      <dt>Mode</dt><dd>${esc(snap.mode || snap.type || "not reported")}</dd>
+      ${countsHtml}
+      ${finished}
+    </dl>
+    ${errorHtml}`;
+}
+
+// ---------- actions ----------
+
+async function onAction(e) {
+  const btn = e.target.closest("[data-action]");
+  if (!btn) return;
+  const action = btn.dataset.action;
+  if (action === "check-now") return checkNow(btn);
+  if (action === "wall") return setWall(!document.body.classList.contains("is-wall"));
+  if (action === "attach-current") return attachCurrent(btn);
+  if (action === "attach-form") return openAttachForm();
+  if (action === "remove-creds") return removeCreds(btn);
+  if (action === "membership-preview") return loadMembership(true);
+  if (action === "membership-apply") return applyMembership();
+}
+
+async function checkNow(btn) {
   btn.disabled = true;
   try {
-    const job = await api.get(`/api/migrate/devices/jobs/${encodeURIComponent(id)}`);
-    currentJob = job;
-    render(job);
-    toast("Refreshed from API.", "ok");
+    const job = await api.get(`/api/migrate/devices/jobs/${encodeURIComponent(state.id)}`);
+    apply(job);
+    // Restart the stream so its pace follows the new state (for example after new credentials).
+    if (!job.progress.finished) connect();
+    toast("Checked with Sophos.", "ok");
   } catch (err) {
-    toast(err.message || "Refresh failed", "err");
+    toast(err.message || "Check failed", "err");
   } finally {
     btn.disabled = false;
   }
 }
 
-function render(job) {
-  document.getElementById("job-title").textContent = job.jobName;
-
-  const created = new Date(job.createdAt);
-  const elapsed = formatElapsed(created);
-  document.getElementById("job-lead").textContent =
-    `Created ${created.toLocaleString()}, ${elapsed} ago. Local job ID ${job.localJobId}.`;
-
-  // Warnings
-  renderWarnings(job);
-
-  document.getElementById("job-status").innerHTML = jobStatusTag(job);
-  renderProgress(job);
-
-  // Core metadata
-  const meta = document.getElementById("job-meta");
-  const toSource = job.direction === "dest-to-source";
-  meta.innerHTML = `
-    <dl class="kv-list meta-inline">
-      <dt>Direction</dt><dd><span class="tag ${toSource ? "tag-dst" : "tag-src"}">${toSource ? "destination" : "source"}</span> ${icon("arrowRight")} <span class="tag ${toSource ? "tag-src" : "tag-dst"}">${toSource ? "source" : "destination"}</span></dd>
-      <dt>Devices</dt><dd class="tnum">${job.endpointIds.length}</dd>
-      <dt>Last polled</dt>
-      <dd>${job.lastPolledAt ? new Date(job.lastPolledAt).toLocaleString() : "not yet"}</dd>
-    </dl>
-    ${job.lastError ? `<div class="banner banner-warn">${esc(job.lastError)}</div>` : ""}
-  `;
-
-  // Source / dest API panels
-  renderApiStatus(job);
-
-  // Per-endpoint grid
-  renderEndpoints(job);
-
-  // Preview group membership once, the first time any device has moved.
-  if (!membershipPreviewed && hasMovedDevice(job)) {
-    membershipPreviewed = true;
-    loadMembership(job.localJobId, true);
+async function attachCurrent(btn) {
+  btn.disabled = true;
+  try {
+    const job = await api.post(`/api/migrate/devices/jobs/${encodeURIComponent(state.id)}/credentials`, { use: "current" });
+    apply(job);
+    toast("Credentials stored with this job.", "ok");
+    connect();
+  } catch (err) {
+    toast(err.message || "Could not attach the credentials", "err", 9000);
+  } finally {
+    btn.disabled = false;
   }
 }
 
-// ---------- group membership after the move ----------
-
-let membershipPreviewed = false;
-
-function hasMovedDevice(job) {
-  const all = [...(job.sourceSnapshot?.endpointDetails ?? []), ...(job.destSnapshot?.endpointDetails ?? [])];
-  return all.some((e) => epStatusClass(e.status) === "ep-ok");
+async function removeCreds(btn) {
+  if (!confirm("Remove the credentials stored with this job?\n\nThe job can then only be checked while the tool points at its tenants. The tool's own connection is not changed.")) return;
+  btn.disabled = true;
+  try {
+    const job = await api.post(`/api/migrate/devices/jobs/${encodeURIComponent(state.id)}/credentials/remove`, {});
+    apply(job);
+    toast("Stored credentials removed.", "ok");
+  } catch (err) {
+    toast(err.message || "Could not remove the credentials", "err");
+  } finally {
+    btn.disabled = false;
+  }
 }
+
+function openAttachForm() {
+  document.getElementById("attach-modal")?.remove();
+  const sides = state.job ? jobSides(state.job) : null;
+  const field = (name, label, type) => `<label>${label}<input type="${type}" name="${name}" autocomplete="off" spellcheck="false" required /></label>`;
+  const modal = document.createElement("div");
+  modal.id = "attach-modal";
+  modal.className = "modal-overlay";
+  modal.innerHTML = `
+    <div class="modal-card" role="dialog" aria-label="Attach credentials">
+      <header class="modal-header"><h2>Attach credentials to this job</h2><button type="button" class="icon-btn" data-close title="Close" aria-label="Close">${icon("x")}</button></header>
+      <form class="modal-body cred-form" id="attach-form">
+        <p class="hint">Tenant API credentials for the two tenants this job ran on, from <strong>Global Settings &gt; API Credentials</strong> in each. The tool checks that both tenants know this migration job before it stores them, encrypted. For partner credentials, point the tool at the two tenants and use the current connection instead.</p>
+        <div class="split-row">
+          <fieldset class="attach-side"><legend>From: ${esc(sides?.sending.name ?? "sending tenant")}</legend>${field("sendingId", "Client ID", "text")}${field("sendingSecret", "Client secret", "password")}</fieldset>
+          <fieldset class="attach-side"><legend>To: ${esc(sides?.receiving.name ?? "receiving tenant")}</legend>${field("receivingId", "Client ID", "text")}${field("receivingSecret", "Client secret", "password")}</fieldset>
+        </div>
+        <div id="attach-result"></div>
+        <div class="form-actions"><button type="submit" class="btn btn-primary">Check and store</button><button type="button" class="btn" data-close>Cancel</button></div>
+      </form>
+    </div>`;
+  document.body.appendChild(modal);
+  const close = () => modal.remove();
+  modal.addEventListener("click", (e) => { if (e.target === modal || e.target.closest("[data-close]")) close(); });
+  modal.querySelector("form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = e.currentTarget;
+    const submit = f.querySelector("[type=submit]");
+    submit.disabled = true;
+    f.querySelector("#attach-result").innerHTML = `<p class="hint"><span class="spin"></span> Checking with Sophos</p>`;
+    try {
+      const job = await api.post(`/api/migrate/devices/jobs/${encodeURIComponent(state.id)}/credentials`, {
+        use: "direct",
+        sending: { clientId: f.sendingId.value, clientSecret: f.sendingSecret.value },
+        receiving: { clientId: f.receivingId.value, clientSecret: f.receivingSecret.value },
+      });
+      close();
+      apply(job);
+      toast("Credentials checked and stored with this job.", "ok");
+      connect();
+    } catch (err) {
+      f.querySelector("#attach-result").innerHTML = `<div class="banner banner-err">${esc(err.message || "Could not attach the credentials")}</div>`;
+      submit.disabled = false;
+    }
+  });
+  modal.querySelector("input").focus();
+}
+
+function setWall(on) {
+  document.body.classList.toggle("is-wall", on);
+  const url = new URL(window.location.href);
+  if (on) url.searchParams.set("view", "wall");
+  else url.searchParams.delete("view");
+  history.replaceState(null, "", url);
+  const label = document.querySelector("#wall-btn .wall-label");
+  if (label) label.textContent = on ? "Exit wall view" : "Wall view";
+  fitWall();
+}
+
+// Wall view scales the page with the screen, so a large display reads from across the room.
+function fitWall() {
+  const on = document.body.classList.contains("is-wall");
+  const zoom = on ? Math.min(2.2, Math.max(1, window.innerWidth / 1440)) : 1;
+  document.documentElement.style.setProperty("--wall-zoom", String(zoom));
+  layoutWall();
+}
+
+// Nobody scrolls a wall screen, so wall view shows the devices that fit and pages through the rest.
+function layoutWall() {
+  const lanes = document.getElementById("lanes");
+  const foot = document.getElementById("lanes-foot");
+  const rows = [...lanes.querySelectorAll(".lane-row")];
+  for (const r of rows) r.hidden = false;
+  foot.hidden = true;
+  if (!document.body.classList.contains("is-wall") || rows.length < 2) return;
+  const top = rows[0].getBoundingClientRect().top;
+  const rowH = rows[1].getBoundingClientRect().top - top;
+  const perPage = Math.max(1, Math.floor((window.innerHeight - top - 76) / rowH));
+  if (rows.length <= perPage) return;
+  const pages = Math.ceil(rows.length / perPage);
+  state.wallPage %= pages;
+  const first = state.wallPage * perPage;
+  rows.forEach((r, i) => { r.hidden = i < first || i >= first + perPage; });
+  foot.hidden = false;
+  foot.textContent = `Devices ${first + 1} to ${Math.min(first + perPage, rows.length)} of ${rows.length}. The list turns every ${WALL_PAGE_MS / 1000} seconds.`;
+}
+
+// ---------- group membership after the move ----------
 
 const MEMBERSHIP_TAG = {
   "will-add": ["tag-accent", "will add"],
@@ -122,23 +605,23 @@ const MEMBERSHIP_TAG = {
   error: ["tag-bad", "failed"],
 };
 
-async function loadMembership(id, dryRun) {
+async function loadMembership(dryRun) {
   const body = document.getElementById("membership-body");
   body.innerHTML = `<p class="hint"><span class="spin"></span> ${dryRun ? "Working out which devices go where" : "Adding devices to groups"}</p>`;
   try {
-    const res = await api.post(`/api/migrate/devices/jobs/${encodeURIComponent(id)}/group-membership`, { dryRun });
+    const res = await api.post(`/api/migrate/devices/jobs/${encodeURIComponent(state.id)}/group-membership`, { dryRun });
     renderMembership(res);
     return res;
   } catch (err) {
-    body.innerHTML = `<div class="banner banner-err">${escHtml(err.message || "Group membership check failed")}</div>`;
+    body.innerHTML = `<div class="banner banner-err">${esc(err.message || "Group membership check failed")}</div>`;
     return null;
   }
 }
 
-async function applyMembership(id) {
+async function applyMembership() {
   const toAdd = document.getElementById("membership-apply").dataset.count;
   if (!confirm(`Add ${toAdd} moved device(s) to their destination groups?\n\nThis writes to the receiving tenant.`)) return;
-  const res = await loadMembership(id, false);
+  const res = await loadMembership(false);
   if (!res) return;
   const failed = res.counts.error ?? 0;
   toast(`Added ${res.counts.added ?? 0} device(s) to groups${failed ? `, ${failed} failed` : ""}.`, failed ? "err" : "ok");
@@ -161,10 +644,10 @@ function renderMembership(res) {
     const [cls, label] = MEMBERSHIP_TAG[r.status] ?? ["tag-muted", r.status];
     return `
       <tr>
-        <td><span class="cell-name">${escHtml(r.hostname)}</span></td>
-        <td>${r.sourceGroup ? escHtml(r.sourceGroup) : `<span class="hint">none</span>`}</td>
-        <td><span class="tag ${cls}">${escHtml(label)}</span></td>
-        <td><span class="hint">${escHtml(r.message || "")}</span></td>
+        <td><span class="cell-name">${esc(r.hostname)}</span></td>
+        <td>${r.sourceGroup ? esc(r.sourceGroup) : `<span class="hint">none</span>`}</td>
+        <td><span class="tag ${cls}">${esc(label)}</span></td>
+        <td><span class="hint">${esc(r.message || "")}</span></td>
       </tr>`;
   }).join("");
   document.getElementById("membership-body").innerHTML = `
@@ -173,238 +656,6 @@ function renderMembership(res) {
       <tbody>${rows}</tbody>
     </table>
     <p class="hint check-foot">${res.dryRun ? "Preview only. Nothing was written." : "Each group change is in data/audit.log."}</p>`;
-}
-
-function renderWarnings(job) {
-  const el = document.getElementById("job-warnings");
-  const warnings = [];
-
-  if (job.status === "in-progress") {
-    const ageMs = Date.now() - new Date(job.createdAt).getTime();
-    if (ageMs > 10 * 60 * 1000) {
-      warnings.push(
-        `This migration has been in progress for ${formatElapsed(new Date(job.createdAt))}. ` +
-        `If the devices are online and checking in, something may be wrong. ` +
-        `Check the upstream jobs below for error details.`
-      );
-    } else if (ageMs > 5 * 60 * 1000) {
-      warnings.push(
-        `Migration has been running for ${formatElapsed(new Date(job.createdAt))}. ` +
-        `Most migrations complete within a few minutes.`
-      );
-    }
-  }
-
-  // Check for API-level errors on either side
-  const srcErr = job.sourceSnapshot?.errorMessage || job.sourceSnapshot?.errorCode;
-  const dstErr = job.destSnapshot?.errorMessage || job.destSnapshot?.errorCode;
-  if (srcErr) warnings.push(`Source API error: ${srcErr}`);
-  if (dstErr) warnings.push(`Destination API error: ${dstErr}`);
-
-  // Check for per-endpoint errors
-  const srcDetails = job.sourceSnapshot?.endpointDetails ?? [];
-  const dstDetails = job.destSnapshot?.endpointDetails ?? [];
-  const allDetails = [...srcDetails, ...dstDetails];
-  const epErrors = allDetails.filter((e) => e.errorMessage || e.errorCode);
-  if (epErrors.length > 0) {
-    const unique = [...new Set(epErrors.map((e) => e.errorMessage || e.errorCode))];
-    warnings.push(`${epErrors.length} endpoint error(s): ${unique.join("; ")}`);
-  }
-
-  if (warnings.length === 0) {
-    el.innerHTML = "";
-    return;
-  }
-  el.innerHTML = warnings
-    .map((w) => `<div class="banner banner-warn">${esc(w)}</div>`)
-    .join("");
-}
-
-function renderApiStatus(job) {
-  const container = document.getElementById("api-status");
-  container.innerHTML = `
-    <div>
-      <h3 class="side-title">Source</h3>
-      ${renderSnapshot(job.sourceSnapshot, "source", job.sourceMigrationId)}
-    </div>
-    <div>
-      <h3 class="side-title is-dest">Destination</h3>
-      ${renderSnapshot(job.destSnapshot, "dest", job.destMigrationId)}
-    </div>
-  `;
-}
-
-function renderSnapshot(snap, side, migrationId) {
-  if (!snap) {
-    return `<div class="banner banner-warn">No data from the ${side === "dest" ? "destination" : "source"} API. The job may have been deleted upstream or the API returned an error.</div>`;
-  }
-
-  const counts = snap.endpointCounts || {};
-  const countsHtml = (counts.total != null)
-    ? `<dt>Endpoints</dt><dd>${counts.total ?? 0} total, ${counts.successful ?? 0} ok, ${counts.failed ?? 0} failed, ${counts.pending ?? 0} pending</dd>`
-    : "";
-
-  const errorHtml = (snap.errorCode || snap.errorMessage)
-    ? `<div class="banner banner-err">
-        ${snap.errorCode ? `<strong>${esc(snap.errorCode)}</strong>: ` : ""}${esc(snap.errorMessage || "Unknown error")}
-       </div>`
-    : "";
-
-  const finished = snap.finishedAt
-    ? `<dt>Finished</dt><dd>${new Date(snap.finishedAt).toLocaleString()}</dd>`
-    : "";
-
-  return `
-    <dl class="kv-list">
-      <dt>Migration ID</dt><dd><code>${esc(migrationId)}</code></dd>
-      <dt>API status</dt><dd>${snap.status ? `<span class="tag ${statusClass(snap.status)}">${esc(snap.status)}</span>` : `<span class="hint">not reported</span>`}</dd>
-      <dt>Mode</dt><dd>${esc(snap.mode || snap.type || "not reported")}</dd>
-      ${countsHtml}
-      ${finished}
-    </dl>
-    ${errorHtml}
-  `;
-}
-
-function renderEndpoints(job) {
-  const grid = document.getElementById("endpoint-grid");
-  const merged = new Map();
-  const srcDetails = job.sourceSnapshot?.endpointDetails ?? [];
-  const dstDetails = job.destSnapshot?.endpointDetails ?? [];
-  for (const id of job.endpointIds) {
-    const hostname = job.endpointHostnames?.[id] || id;
-    merged.set(id, { id, hostname, source: null, dest: null });
-  }
-  for (const e of srcDetails) {
-    if (merged.has(e.id)) merged.get(e.id).source = e;
-  }
-  for (const e of dstDetails) {
-    if (merged.has(e.id)) merged.get(e.id).dest = e;
-  }
-  const rows = Array.from(merged.values())
-    .map((m) => {
-      const srcError = m.source?.errorMessage || m.source?.errorCode || "";
-      const dstError = m.dest?.errorMessage || m.dest?.errorCode || "";
-      const errors = [srcError && `Source: ${srcError}`, dstError && `Destination: ${dstError}`].filter(Boolean);
-      return `
-      <tr${errors.length ? ' class="has-error"' : ""}>
-        <td><span class="cell-name">${esc(m.hostname || m.id)}</span></td>
-        <td>${epState(m.source?.status)}</td>
-        <td>${epState(m.dest?.status)}</td>
-        <td>${checkInCell(job.checkIns?.[m.id])}</td>
-        <td>${errors.length ? `<span class="ep-error">${esc(errors.join(" · "))}</span>` : `<span class="hint">none</span>`}</td>
-      </tr>`;
-    })
-    .join("");
-  grid.innerHTML = `
-    <table class="data-table">
-      <thead><tr><th>Device</th><th><span class="side-title">Source</span></th><th><span class="side-title is-dest">Destination</span></th><th>Check-in</th><th>Errors</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>`;
-}
-
-// Arrival on the receiving tenant. The API says "succeeded" at the handover;
-// the device moves when it next checks in, under its new ID.
-function checkInCell(c) {
-  const newId = c?.newId ? `<div class="hint">new ID <code>${esc(c.newId)}</code></div>` : "";
-  if (!c) return `<span class="ep-state"><span class="conn-dot" data-state="unconfigured"></span><span class="hint">no data</span></span>`;
-  if (c.state === "checked-in") {
-    const title = "The device's last-seen time when this page first found it checked in. With the page open during the move, this is within 10 seconds of the check-in.";
-    return `<span class="ep-state" title="${esc(title)}"><span class="conn-dot" data-state="ok"></span>checked in by ${esc(new Date(c.checkedInAt).toLocaleString())}</span>${newId}`;
-  }
-  if (c.state === "waiting") {
-    const since = c.handedOverAt ? `<div class="hint">handed over ${esc(new Date(c.handedOverAt).toLocaleString())}</div>` : "";
-    return `<span class="ep-state"><span class="conn-dot" data-state="loading"></span>waiting for check-in</span>${since}${newId}`;
-  }
-  if (c.state === "move-failed") return `<span class="ep-state"><span class="conn-dot" data-state="error"></span>move failed</span>`;
-  return `<span class="ep-state"><span class="conn-dot" data-state="unconfigured"></span><span class="hint">not handed over yet</span></span>`;
-}
-
-function formatElapsed(since) {
-  const ms = Date.now() - since.getTime();
-  const sec = Math.floor(ms / 1000);
-  if (sec < 60) return `${sec}s`;
-  const min = Math.floor(sec / 60);
-  const remSec = sec % 60;
-  if (min < 60) return `${min}m ${remSec}s`;
-  const hr = Math.floor(min / 60);
-  const remMin = min % 60;
-  return `${hr}h ${remMin}m`;
-}
-
-function statusClass(status) {
-  const s = (status || "").toLowerCase();
-  if (s === "complete" || s === "completed" || s === "succeeded") return "tag-ok";
-  if (s === "failed" || s === "cancelled" || s === "error") return "tag-bad";
-  return "tag-warn";
-}
-
-// "complete" from the API means handed over; until every device checks in, say so.
-function jobStatusTag(job) {
-  const s = (job.status || "").toLowerCase();
-  const waiting = Object.values(job.checkIns ?? {}).some((c) => c.state === "waiting");
-  if (waiting && (s === "complete" || s === "partially-complete")) {
-    return `<span class="tag tag-warn"><span class="conn-dot" data-state="loading"></span>waiting for check-in</span>`;
-  }
-  return statusTag(job.status);
-}
-
-function statusTag(status) {
-  const s = (status || "").toLowerCase();
-  const label = s === "in-progress" ? "in progress" : s === "partially-complete" ? "partly complete" : s || "unknown";
-  const live = s === "in-progress" ? `<span class="conn-dot" data-state="loading"></span>` : "";
-  return `<span class="tag ${statusClass(status)}">${live}${esc(label)}</span>`;
-}
-
-// Device-level state with a dot that pulses while the device is still pending.
-function epState(status) {
-  const s = (status || "").toLowerCase();
-  if (!s) return `<span class="ep-state"><span class="conn-dot" data-state="unconfigured"></span><span class="hint">no data</span></span>`;
-  const cls = epStatusClass(s);
-  const state = cls === "ep-ok" ? "ok" : cls === "ep-fail" ? "error" : "loading";
-  return `<span class="ep-state"><span class="conn-dot" data-state="${state}"></span>${esc(s)}</span>`;
-}
-
-function renderProgress(job) {
-  const el = document.getElementById("job-progress");
-  const byId = new Map();
-  for (const e of [...(job.sourceSnapshot?.endpointDetails ?? []), ...(job.destSnapshot?.endpointDetails ?? [])]) {
-    const prev = byId.get(e.id);
-    if (!prev || epStatusClass(e.status) !== "") byId.set(e.id, e);
-  }
-  const total = job.endpointIds.length;
-  let moved = 0;
-  let failed = 0;
-  let checkedIn = 0;
-  for (const id of job.endpointIds) {
-    const cls = epStatusClass(byId.get(id)?.status);
-    if (cls === "ep-ok") moved++;
-    else if (cls === "ep-fail") failed++;
-    if (job.checkIns?.[id]?.state === "checked-in") checkedIn++;
-  }
-  const done = moved + failed;
-  // The bar fills as devices arrive, not at the handover.
-  const pct = total ? Math.round(((checkedIn + failed) / total) * 100) : 0;
-  const s = (job.status || "").toLowerCase();
-  const cls = s === "failed" || s === "cancelled" ? "is-bad" : pct >= 100 ? "is-ok" : "is-live";
-  el.innerHTML = `
-    <div class="job-bar">
-      <div class="bar bar-lg" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><span class="bar-fill ${cls}" style="width:${Math.max(pct, 3)}%"></span></div>
-      <span class="tnum job-bar-text"><strong>${moved}</strong> handed over, <strong>${checkedIn}</strong> checked in${failed ? `, <strong>${failed}</strong> failed` : ""}, ${total - done} pending of ${total}</span>
-    </div>`;
-}
-
-function epStatusClass(status) {
-  const s = (status || "").toLowerCase();
-  if (s === "complete" || s === "completed" || s === "succeeded" || s === "migrated") return "ep-ok";
-  if (s === "failed" || s === "error") return "ep-fail";
-  return "";
-}
-
-function esc(s) {
-  return String(s).replace(/[&<>"]/g, (c) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;",
-  }[c]));
 }
 
 boot();
