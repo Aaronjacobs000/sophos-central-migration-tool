@@ -14,6 +14,34 @@ export const STATUS = {
   cancelled: { label: "Cancelled", cls: "tag-muted" },
 };
 
+/**
+ * The dashboard's Verify step for the local jobs. A job with a failed or
+ * expired device needs a look even while its other devices are still moving,
+ * so failures come first. Each job is counted once.
+ */
+export function verifySummary(jobs) {
+  const n = { completed: 0, running: 0, failed: 0, cancelled: 0 };
+  for (const j of jobs) {
+    const failedDevices = (j.progress?.failed ?? 0) + (j.progress?.expired ?? 0);
+    if (j.status === "cancelled") n.cancelled++;
+    else if (j.status === "failed" || j.status === "completed-with-failures" || failedDevices > 0) n.failed++;
+    else if (j.status === "requested" || j.status === "in-progress") n.running++;
+    else n.completed++;
+  }
+  const parts = [`${n.completed} completed`, `${n.running} in progress`];
+  if (n.failed) parts.push(`${n.failed} with failures`);
+  if (n.cancelled) parts.push(`${n.cancelled} cancelled`);
+  return {
+    state: n.failed ? "bad" : n.running ? "warn" : "ok",
+    tag: n.failed
+      ? `${n.failed} ${n.failed === 1 ? "needs" : "need"} a look`
+      : n.running
+        ? `${n.running} in progress`
+        : n.completed === jobs.length ? "All completed" : `${n.completed} completed`,
+    line: `<b>${jobs.length}</b> ${jobs.length === 1 ? "job" : "jobs"}: ${parts.join(", ")}`,
+  };
+}
+
 export function statusLabel(status) {
   return STATUS[status]?.label ?? String(status || "unknown").replace(/-/g, " ");
 }

@@ -4,6 +4,7 @@ import { getPreloadStatus, refreshSection, startPreload, getCachedSection } from
 import { toast } from "./toast.js";
 import { icon } from "./icons.js";
 import { esc, escAttr, plural } from "./ui.js";
+import { verifySummary } from "./migration-view.js";
 
 const SECTIONS = [
   { id: "policies", label: "Policies", href: "/policies.html" },
@@ -289,18 +290,8 @@ function renderJourney(data) {
   } else if (data.jobs.length === 0) {
     verify = { state: "muted", tag: "No moves yet", lines: ["Jobs started from this tool appear here."] };
   } else {
-    // Statuses come from the server: requested, in-progress, completed, completed-with-failures, failed.
-    const count = (...st) => data.jobs.filter((j) => st.includes(j.status)).length;
-    const running = count("requested", "in-progress");
-    const done = count("completed");
-    const failed = count("failed", "completed-with-failures");
-    verify = {
-      state: failed ? "bad" : running ? "warn" : "ok",
-      tag: running ? `${running} in progress` : failed ? `${failed} need a look` : "All completed",
-      lines: [
-        `<b>${data.jobs.length}</b> ${data.jobs.length === 1 ? "job" : "jobs"}: ${done} completed, ${running} in progress${failed ? `, ${failed} with failures` : ""}`,
-      ],
-    };
+    const { state, tag, line } = verifySummary(data.jobs);
+    verify = { state, tag, lines: [line] };
   }
   Object.assign(verify, { n: 4, title: "Verify", icon: "checkCircle", href: "/migrate-jobs.html", cta: "Migrations" });
 
