@@ -15,6 +15,7 @@ import {
   deleteUserGroup,
 } from "../sophos/api/user-groups.js";
 import { listUsers } from "../sophos/api/users.js";
+import { auditedDelete } from "../services/audit-log.js";
 
 export const groupsRouter = Router();
 
@@ -65,7 +66,7 @@ groupsRouter.post("/:side/groups", jsonBody, async (req, res, next) => {
 groupsRouter.delete("/:side/groups/:id", async (req, res, next) => {
   try {
     const ctx = res.locals.tenantContext!;
-    await deleteGroup(ctx.client, ctx.tenantId, req.params.id!);
+    await auditedDelete(ctx, "endpoint-group", req.params.id!, () => deleteGroup(ctx.client, ctx.tenantId, req.params.id!));
     res.status(204).end();
   } catch (err) {
     next(err);
@@ -97,7 +98,7 @@ groupsRouter.post("/:side/user-groups", jsonBody, async (req, res, next) => {
 groupsRouter.delete("/:side/user-groups/:id", async (req, res, next) => {
   try {
     const ctx = res.locals.tenantContext!;
-    await deleteUserGroup(ctx.client, ctx.tenantId, req.params.id!);
+    await auditedDelete(ctx, "user-group", req.params.id!, () => deleteUserGroup(ctx.client, ctx.tenantId, req.params.id!));
     res.status(204).end();
   } catch (err) {
     next(err);

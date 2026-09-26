@@ -10,6 +10,7 @@ import {
   updatePolicy,
   deletePolicy,
 } from "../sophos/api/policies.js";
+import { auditedDelete } from "../services/audit-log.js";
 
 export const policiesRouter = Router();
 
@@ -75,7 +76,7 @@ policiesRouter.patch("/:side/policies/:id", async (req, res, next) => {
 policiesRouter.delete("/:side/policies/:id", async (req, res, next) => {
   try {
     const ctx = res.locals.tenantContext!;
-    await deletePolicy(ctx.client, ctx.tenantId, req.params.id!);
+    await auditedDelete(ctx, "policy", req.params.id!, () => deletePolicy(ctx.client, ctx.tenantId, req.params.id!));
     res.status(204).end();
   } catch (err) {
     next(err);

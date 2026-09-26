@@ -42,3 +42,23 @@ export async function audit(entry: Omit<AuditEntry, "id" | "ts">): Promise<void>
   });
   return writeQueue;
 }
+
+/**
+ * Runs one delete from a page's row menu and audits it, as done or with the
+ * error, which is then rethrown for the route's error handler.
+ */
+export async function auditedDelete(
+  ctx: { label: "source" | "dest"; tenantId: string },
+  resource: string,
+  resourceId: string,
+  run: () => Promise<unknown>,
+): Promise<void> {
+  const entry = { side: ctx.label, tenantId: ctx.tenantId, action: "delete", resource, resourceId };
+  try {
+    await run();
+  } catch (err) {
+    await audit({ ...entry, ok: false, error: err instanceof Error ? err.message : String(err) });
+    throw err;
+  }
+  await audit({ ...entry, ok: true });
+}

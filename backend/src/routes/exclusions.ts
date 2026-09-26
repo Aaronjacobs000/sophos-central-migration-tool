@@ -14,6 +14,7 @@ import {
   deleteBlockedItem,
 } from "../sophos/api/exclusions.js";
 import { listForType } from "../services/exclusion-copier.js";
+import { auditedDelete } from "../services/audit-log.js";
 
 export const exclusionsRouter = Router();
 
@@ -96,7 +97,7 @@ exclusionsRouter.post("/:side/exclusions/blocked-items", jsonBody, async (req, r
 exclusionsRouter.delete("/:side/exclusions/scanning/:id", async (req, res, next) => {
   try {
     const ctx = res.locals.tenantContext!;
-    await deleteScanningExclusion(ctx.client, ctx.tenantId, req.params.id!);
+    await auditedDelete(ctx, "scanning", req.params.id!, () => deleteScanningExclusion(ctx.client, ctx.tenantId, req.params.id!));
     res.status(204).end();
   } catch (err) {
     next(err);
@@ -106,7 +107,7 @@ exclusionsRouter.delete("/:side/exclusions/scanning/:id", async (req, res, next)
 exclusionsRouter.delete("/:side/exclusions/allowed-items/:id", async (req, res, next) => {
   try {
     const ctx = res.locals.tenantContext!;
-    await deleteAllowedItem(ctx.client, ctx.tenantId, req.params.id!);
+    await auditedDelete(ctx, "allowed-items", req.params.id!, () => deleteAllowedItem(ctx.client, ctx.tenantId, req.params.id!));
     res.status(204).end();
   } catch (err) {
     next(err);
@@ -116,7 +117,7 @@ exclusionsRouter.delete("/:side/exclusions/allowed-items/:id", async (req, res, 
 exclusionsRouter.delete("/:side/exclusions/blocked-items/:id", async (req, res, next) => {
   try {
     const ctx = res.locals.tenantContext!;
-    await deleteBlockedItem(ctx.client, ctx.tenantId, req.params.id!);
+    await auditedDelete(ctx, "blocked-items", req.params.id!, () => deleteBlockedItem(ctx.client, ctx.tenantId, req.params.id!));
     res.status(204).end();
   } catch (err) {
     next(err);

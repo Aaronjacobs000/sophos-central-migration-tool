@@ -81,7 +81,7 @@ The Migrations page, a job's monitor, and the same monitor in wall view:
 
 - The dashboard shows the route, a four-step checklist (connect, configuration, devices, verify) with live counts, and the preload state of each data section with a refresh button per tenant.
 - Ctrl K opens a palette for going to any page or finding a device by hostname.
-- The Logs page shows the last 500 server log lines with filters. Copies, clones and migrations are also written to `data/audit.log`.
+- The Logs page shows the last 500 server log lines with filters. Copies, clones, deletes and migrations are also written to `data/audit.log`.
 
 ## Prerequisites
 
@@ -168,7 +168,7 @@ docs/                            # README screenshots (made against the fake API
 data/                            # Created at run time, not committed
   migration-jobs.json            # Local migration jobs
   job-credentials.json           # Each job's credentials, encrypted (key kept outside the repo)
-  audit.log                      # Copies, clones and migrations
+  audit.log                      # Copies, clones, deletes and migrations
 
 .env                             # Not committed, managed by the UI
 .env.example                     # Template with every supported key
@@ -191,7 +191,7 @@ data/                            # Created at run time, not committed
   - The job page has *Remove stored credentials*. Use it once a job has finished; an entry no job uses is deleted. The tool's own `.env` is not changed.
   - They are stored rather than read from `.env` because `.env` holds only the pair the tool points at now, so a reference into it would break, or point at the wrong tenants, as soon as the tool is repointed.
 - Exclusion and web filtering copies, device migrations and group membership can be run as a dry run first from the page, which returns what would be created or changed without touching the destination. The API accepts `dryRun` on policy and group copies too.
-- Copies, clones and migrations are recorded in `data/audit.log` with a timestamp, ID, side, tenant ID, resource and result.
+- Copies, clones, deletes and migrations are recorded in `data/audit.log` with a timestamp, ID, side, tenant ID, resource and result.
 - Deleting a policy, group or exclusion asks for confirmation twice. Overwriting a policy asks once.
 
 ## Credits
