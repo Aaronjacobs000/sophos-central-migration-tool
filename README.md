@@ -36,6 +36,8 @@ When a web control policy points at a web filtering profile, the clone maps the 
 
 A Linux runtime detection policy points at a detection profile by ID and version. The clone maps it to the destination profile with the same name, at that profile's latest version, because each tenant numbers its own versions. The tool does not copy these profiles: if the destination has no profile of that name, the policy is not cloned and the result names the profile to create there first. The deep match and Compare show the profile by name, and a version that is the profile's latest as "latest".
 
+Sophos accepts at most 1000 applications in each application control list (controlled and allowed) through its API, and every write replaces the whole list, so a longer list can't be sent in parts. A policy over the limit is not cloned or overwritten, and the result gives the count.
+
 ### Web filtering
 
 Site lists and web filtering profiles copy to the destination. Copy site lists first: a profile refers to site lists by ID, and the copy maps each one to the destination list with the same name. Profile links to policies are not copied; cloning the web control policy makes the link. A copy ends with a list of what was created, with notes on anything that was mapped or left out. A tick marks a source list or profile that is already on the destination. Destination site lists and profiles can be deleted from a row menu to undo a copy, after a preview and a double confirmation; each delete is audited.

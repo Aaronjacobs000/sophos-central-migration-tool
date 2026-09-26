@@ -23,6 +23,9 @@
  * destination profile's latest, because each tenant counts its own versions.
  * The tool does not copy these profiles, so when the destination has none of
  * that name the policy is not written, and the result names the profile.
+ *
+ * An application control list longer than the API accepts is not written
+ * either, and the result gives the count (see oversizedAppLists).
  */
 
 import { getPolicy, listPolicies, createPolicy, updatePolicy } from "../sophos/api/policies.js";
@@ -201,11 +204,12 @@ export async function migratePolicies(
       }
     }
 
-    const unmapped =
+    const unwritable =
+      oversizedAppLists(body.settings) ??
       (await remapWebProfiles(body.settings, webProfiles, adjustments)) ??
       (await remapRuntimeProfiles(body.settings, runtimeProfiles, adjustments));
-    if (unmapped) {
-      // Nothing is sent: the destination refuses the policy without its profile.
+    if (unwritable) {
+      // Nothing is sent: the destination would refuse the policy.
       results[i] = {
         sourceId,
         sourceName: sourcePolicy.name,
@@ -213,7 +217,7 @@ export async function migratePolicies(
         destName: match?.name,
         ok: false,
         action: req.dryRun ? (match ? "dry-run-overwrite" : "dry-run-create") : match ? "overwrite" : "create",
-        error: unmapped,
+        error: unwritable,
         adjustments: adjustments.length ? adjustments : undefined,
       };
       continue;
@@ -465,6 +469,30 @@ export async function remapRuntimeProfiles(
     settings[versionKey] = { ...(settings[versionKey] as object | undefined), value: dest.version };
     adjustments.push(`mapped Linux runtime detection profile "${name}" to the destination profile with the same name, at its latest version (${dest.version})`);
   }
+}
+
+/**
+ * Sophos refuses a policy write that lists more than 1000 applications in an
+ * application control list, with a bare 400 "BadRequest". Measured 26/09/2026
+ * on create, PATCH and the settings PATCH alike: 1000 is accepted and 1001 is
+ * not, whatever the size of the body, and each list counts on its own. Every
+ * write replaces the whole list, so the rest can't be added in batches.
+ */
+export const APP_LIST_LIMIT = 1000;
+const APP_LIST_SETTINGS: Record<string, string> = {
+  "endpoint.application-control.controlled-applications": "controlled applications",
+  "endpoint.application-control.allowed-applications": "allowed applications",
+};
+
+/** Why the policy can't be written, when an application list is over the limit. */
+export function oversizedAppLists(settings: Record<string, unknown> | undefined): string | undefined {
+  if (!settings) return;
+  const over = Object.entries(APP_LIST_SETTINGS).flatMap(([key, label]) => {
+    const v = (settings[key] as { value?: unknown } | undefined)?.value;
+    return Array.isArray(v) && v.length > APP_LIST_LIMIT ? [`${v.length} ${label}`] : [];
+  });
+  if (!over.length) return;
+  return `the policy lists ${over.join(" and ")}, and Sophos accepts at most ${APP_LIST_LIMIT} per list through its API, so it was not sent: cut the list to ${APP_LIST_LIMIT} or fewer on the source and clone again, or build this policy on the destination in Sophos Fusion`;
 }
 
 /**

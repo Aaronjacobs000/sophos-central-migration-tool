@@ -107,6 +107,8 @@
         <p>A Linux runtime detection policy uses a detection profile. The clone points it at the destination profile
           with the same name, at that profile's latest version. The tool does not copy these profiles: with no such
           profile the policy is not cloned, and the result names the profile to create on the destination first.</p>
+        <p>Sophos accepts at most 1000 applications in each application control list through its API, and every
+          write replaces the whole list. A policy with a longer list is not cloned, and the result gives the count.</p>
       </section>
 
       <section class="panel-card">
