@@ -7,7 +7,7 @@
 
 A locally run web tool for moving configuration and devices between two Sophos Fusion (formerly Sophos Central) tenants.
 
-It connects to a source and a destination tenant through the public Sophos Fusion APIs, shows policies, groups, exclusions, web filtering and devices side by side, and moves the items you pick. Copies and migrations can be previewed with a dry run first, and they are recorded in an audit log. Device moves use the two-tenant migration flow and show each device's progress live.
+It connects to a source and a destination tenant through the public Sophos Fusion APIs, shows policies, groups, exclusions, web filtering and devices side by side, and moves the items you pick. Exclusion and web filtering copies and device migrations can be previewed with a dry run first, and every write is recorded in an audit log. Device moves use the two-tenant migration flow and show each device's progress live.
 
 ![Dashboard showing the source to destination route, the four migration steps and the preload counts](docs/screenshot.png)
 
@@ -151,6 +151,7 @@ backend/
     services/                    # Policy, group, exclusion and web filter copies, device
                                  # migration, group membership, pre-flight and licence checks
     compare/json-diff.ts         # Small structural diff
+    compare/policy-pairing.ts    # Pairs source and destination policies by type and name
     middleware/                  # requireConfigured, sideParam, JSON-only guards, errorHandler
 
 frontend/                        # Plain HTML and ES modules, no build step
@@ -189,7 +190,7 @@ data/                            # Created at run time, not committed
   - Limits: anyone who can read both the key and `data/` as your user can decrypt them, the same trust as the plain-text `.env`. On Windows the file modes are not enforced, so rely on the user profile's own permissions. If the key is lost (another computer, or the file deleted), jobs say their credentials can't be read, and you can attach them again.
   - The job page has *Remove stored credentials*. Use it once a job has finished; an entry no job uses is deleted. The tool's own `.env` is not changed.
   - They are stored rather than read from `.env` because `.env` holds only the pair the tool points at now, so a reference into it would break, or point at the wrong tenants, as soon as the tool is repointed.
-- Copies and migrations can be run as a dry run first, which returns what would be created or changed without touching the destination.
+- Exclusion and web filtering copies, device migrations and group membership can be run as a dry run first from the page, which returns what would be created or changed without touching the destination. The API accepts `dryRun` on policy and group copies too.
 - Copies, clones and migrations are recorded in `data/audit.log` with a timestamp, ID, side, tenant ID, resource and result.
 - Deleting a policy, group or exclusion asks for confirmation twice. Overwriting a policy asks once.
 
