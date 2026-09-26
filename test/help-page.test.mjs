@@ -18,3 +18,9 @@ test("Help says there is no sign-in and how to share the tool, as the README doe
     assert.ok(readme.includes(phrase), `README: ${phrase}`);
   }
 });
+
+test("Help says partner and organization credentials work, as the README and the setup wizard do", () => {
+  assert.doesNotMatch(help, /Partner or organization credentials are not supported/);
+  assert.match(help, /one partner or organization credential that manages both tenants/);
+  assert.match(readme, /one partner or organization credential that manages both tenants/);
+});
