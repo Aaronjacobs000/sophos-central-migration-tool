@@ -533,7 +533,11 @@ export function oversizedAppLists(settings: Record<string, unknown> | undefined)
  * call the highest priority. Asking for 1 puts the new policy at the bottom,
  * just above the base policy, and the API moves the existing policies of
  * that type up by one, keeping their order. Both measured on a live tenant
- * on 24/09/2026; deleting the clone moves them back down.
+ * on 24/09/2026; deleting the clone moves them back down. For some types
+ * Sophos also stamps a new updatedAt on each policy it moves, though nothing
+ * else changes: peripheral control does, application control does not
+ * (measured with direct API calls on 27/09/2026). That is Sophos's doing;
+ * the clone sends one POST.
  */
 const BOTTOM_PRIORITY = 1;
 
