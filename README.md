@@ -26,25 +26,25 @@ A first-run wizard walks through either mode, tests the connection before saving
 
 Endpoint policies are grouped by product, source on the left and destination on the right. A deep match reads the full settings of every policy that exists on both sides, and each product shows a small bar of how many policies match, differ, or exist on one side only. You can hide products where everything matches.
 
-![Policies page. Application Control has one policy that matches, one that differs by one setting, one on the source only with a Clone button, and one on the destination only](docs/policies.png)
+![Policies page. Application Control has one policy that matches and one that differs by one setting, both ticked as already on the destination, one on the source only with a Clone button, and one on the destination only](docs/policies.png)
 
-Compare opens one table of settings grouped by section, with readable labels (the raw setting key shows when you hover a row). Clone copies a source-only policy to the bottom of the destination's priority order, just above the base policy, and Compare offers to overwrite a destination policy with the source version. Destination policies can be deleted from a row menu after a double confirmation.
+Compare opens one table of settings grouped by section, with readable labels (the raw setting key shows when you hover a row). A tick marks a source policy that is already on the destination. Clone copies a source-only policy to the bottom of the destination's priority order, just above the base policy, and ends with a list of each policy marked created, already there, or failed, with notes on settings changed to fit. Compare offers to overwrite a destination policy with the source version. Destination policies can be deleted from a row menu after a double confirmation.
 
 Policy assignments cannot be migrated because the public API rejects every `appliesTo` write. Export assignments (CSV) lists them so you can reassign them by hand.
 
-When a web control policy points at a web filtering profile, the clone maps the profile ID to the destination profile with the same name. If the destination has no such profile, the setting is dropped and the result says so.
+When a web control policy points at a web filtering profile, the clone maps the profile ID to the destination profile with the same name. If the destination has no such profile, the setting is dropped and the result says so. The deep match and Compare show the profile by name, so a correct clone matches.
 
 ### Web filtering
 
-Site lists and web filtering profiles copy to the destination. Copy site lists first: a profile refers to site lists by ID, and the copy maps each one to the destination list with the same name. Profile links to policies are not copied; cloning the web control policy makes the link. A copy ends with a list of what was created, with notes on anything that was mapped or left out. Destination site lists and profiles can be deleted from a row menu to undo a copy, after a preview and a double confirmation; each delete is audited.
+Site lists and web filtering profiles copy to the destination. Copy site lists first: a profile refers to site lists by ID, and the copy maps each one to the destination list with the same name. Profile links to policies are not copied; cloning the web control policy makes the link. A copy ends with a list of what was created, with notes on anything that was mapped or left out. A tick marks a source list or profile that is already on the destination. Destination site lists and profiles can be deleted from a row menu to undo a copy, after a preview and a double confirmation; each delete is audited.
 
 ### Groups
 
-Endpoint groups and user groups mirror to the destination by name and description. Members are not copied, because source device IDs mean nothing on the destination. After a device move, the job page can add each moved device to the destination group with the same name as its source group, so policies assigned to that group follow it.
+Endpoint groups and user groups mirror to the destination by name and description. A group already on the destination, matched by name in any case, is skipped, and a tick marks it on the source side. A mirror ends with a list of every group marked created, already there, or failed. Members are not copied, because source device IDs mean nothing on the destination. After a device move, the job page can add each moved device to the destination group with the same name as its source group, so policies assigned to that group follow it.
 
 ### Exclusions and lists
 
-Eight global lists copy with the same duplicate check: scanning exclusions, allowed items, blocked items, isolation exclusions, intrusion prevention exclusions, custom exploit mitigation applications, Website Management entries, and websites excluded from TLS decryption. A copy ends with a list of every item marked created, already there, or failed. Rows that already exist on both sides are dimmed. Copy the Website Management entries before cloning web control policies, because those policies refer to their tags.
+Eight global lists copy with the same duplicate check: scanning exclusions, allowed items, blocked items, isolation exclusions, intrusion prevention exclusions, custom exploit mitigation applications, Website Management entries, and websites excluded from TLS decryption. A copy ends with a list of every item marked created, already there, or failed. Rows that exist on both sides are dimmed, and a tick marks a source item that is already on the destination. Copy the Website Management entries before cloning web control policies, because those policies refer to their tags.
 
 ### Device migration
 
@@ -162,7 +162,7 @@ frontend/                        # Plain HTML and ES modules, no build step
 
 test/                            # node:test suites against a fake Sophos API
 
-docs/                            # README screenshots (made against the fake API) and the Windows test plan
+docs/                            # README screenshots (made against the fake API)
 
 data/                            # Created at run time, not committed
   migration-jobs.json            # Local migration jobs
