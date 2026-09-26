@@ -35,12 +35,15 @@ export async function audit(entry: Omit<AuditEntry, "id" | "ts">): Promise<void>
   const dir = path.join(state.repoRoot, "data");
   const file = path.join(dir, "audit.log");
 
-  // Serialise writes so concurrent migrations don't interleave lines.
-  writeQueue = writeQueue.then(async () => {
+  // Serialise writes so concurrent migrations don't interleave lines. A write
+  // that fails fails alone: the next one still runs.
+  const write = async () => {
     await fs.mkdir(dir, { recursive: true });
     await fs.appendFile(file, JSON.stringify(full) + "\n", { encoding: "utf8" });
-  });
-  return writeQueue;
+  };
+  const run = writeQueue.then(write, write);
+  writeQueue = run.catch(() => {});
+  return run;
 }
 
 /**

@@ -7,6 +7,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { readdir, readFile, writeFile, mkdir } from "node:fs/promises";
+import { promises as fsp } from "node:fs";
 import path from "node:path";
 import { createFakeSophos, SRC, DST, page } from "./helpers/fake-sophos.mjs";
 import { bootApp, readAudit } from "./helpers/app.mjs";
@@ -180,4 +181,19 @@ test("the routes listed as local write nothing to a tenant", async () => {
     const { writes } = await send(request);
     assert.deepEqual(writes.map((w) => `${w.method} ${w.path}`), [], route);
   }
+});
+
+test("a failed audit write fails that entry only, and the next entry is written", async () => {
+  const { audit } = await import("../backend/dist/services/audit-log.js");
+  const appendFile = fsp.appendFile;
+  fsp.appendFile = async () => { throw Object.assign(new Error("EBUSY: resource busy or locked"), { code: "EBUSY" }); };
+  try {
+    await assert.rejects(audit({ side: "dest", tenantId: DST.tenantId, action: "create", resource: "while-locked", ok: true }), /EBUSY/);
+  } finally {
+    fsp.appendFile = appendFile;
+  }
+  await audit({ side: "dest", tenantId: DST.tenantId, action: "create", resource: "after-lock", ok: true });
+  const resources = (await readAudit(root)).map((e) => e.resource);
+  assert.ok(resources.includes("after-lock"));
+  assert.ok(!resources.includes("while-locked"));
 });

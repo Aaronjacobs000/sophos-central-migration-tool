@@ -151,7 +151,14 @@ function snapshotWithoutToken(snap: SophosMigrationJob | null | undefined): Soph
   return rest;
 }
 
-let writeQueue: Promise<void> = Promise.resolve();
+let queue: Promise<unknown> = Promise.resolve();
+
+/** Run one save at a time. A save that fails fails alone: the next one still runs. */
+function serial<T>(fn: () => Promise<T>): Promise<T> {
+  const run = queue.then(fn, fn);
+  queue = run.catch(() => {});
+  return run;
+}
 
 function jobsFile(): string {
   return path.join(getState().repoRoot, "data", "migration-jobs.json");
@@ -160,7 +167,12 @@ function jobsFile(): string {
 /** Codes that indicate a transient file lock (OneDrive, antivirus, etc.). */
 const RETRYABLE_CODES = new Set(["EBUSY", "EPERM", "EACCES"]);
 const MAX_RETRIES = 5;
-const BASE_DELAY_MS = 150;
+let baseDelayMs = 150;
+
+/** The wait before the first retry on a locked file, doubled for each one after. Tests shorten it. */
+export function setRetryDelay(ms: number): void {
+  baseDelayMs = ms;
+}
 
 async function withRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
   for (let attempt = 0; ; attempt++) {
@@ -169,7 +181,7 @@ async function withRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
       if (code && RETRYABLE_CODES.has(code) && attempt < MAX_RETRIES) {
-        const delay = BASE_DELAY_MS * Math.pow(2, attempt);
+        const delay = baseDelayMs * Math.pow(2, attempt);
         log.emit("warn", "migration-store", `${label}: ${code}, retry ${attempt + 1}/${MAX_RETRIES} in ${delay}ms`);
         await new Promise((r) => setTimeout(r, delay));
         continue;
@@ -192,12 +204,25 @@ async function readAll(): Promise<LocalMigrationJob[]> {
 async function writeAll(jobs: LocalMigrationJob[]): Promise<void> {
   const file = jobsFile();
   const dir = path.dirname(file);
-  await fs.mkdir(dir, { recursive: true });
-  await withRetry("writeAll", async () => {
-    // Write directly instead of tmp+rename. OneDrive can lock the target
-    // during sync, which makes the rename fail even if the write succeeds.
-    await fs.writeFile(file, JSON.stringify(jobs, null, 2), "utf8");
-  });
+  try {
+    await fs.mkdir(dir, { recursive: true });
+    await withRetry("writeAll", async () => {
+      // Write directly instead of tmp+rename. OneDrive can lock the target
+      // during sync, which makes the rename fail even if the write succeeds.
+      await fs.writeFile(file, JSON.stringify(jobs, null, 2), "utf8");
+    });
+  } catch (err) {
+    throw saveError(err);
+  }
+}
+
+/** An error that says the jobs were not saved, and for a lock, what usually holds the file. */
+function saveError(err: unknown): Error {
+  const code = (err as NodeJS.ErrnoException).code;
+  const reason = code && RETRYABLE_CODES.has(code)
+    ? `data/migration-jobs.json stayed locked (${code}), usually by OneDrive or antivirus. Try again`
+    : err instanceof Error ? err.message : String(err);
+  return new Error(`Couldn't save the migration jobs: ${reason}.`, { cause: err });
 }
 
 export async function listJobs(): Promise<LocalMigrationJob[]> {
@@ -221,12 +246,11 @@ export async function createJob(
     ...init,
   });
 
-  writeQueue = writeQueue.then(async () => {
+  await serial(async () => {
     const jobs = await readAll();
     jobs.unshift(job);
     await writeAll(jobs);
   });
-  await writeQueue;
   return job;
 }
 
@@ -234,24 +258,20 @@ export async function updateJob(
   localJobId: string,
   patch: Partial<LocalMigrationJob>,
 ): Promise<LocalMigrationJob | null> {
-  let updated: LocalMigrationJob | null = null;
-  writeQueue = writeQueue.then(async () => {
+  return serial(async () => {
     const jobs = await readAll();
     const idx = jobs.findIndex((j) => j.localJobId === localJobId);
-    if (idx < 0) return;
+    if (idx < 0) return null;
     jobs[idx] = withoutTokens({ ...jobs[idx]!, ...patch });
-    updated = jobs[idx]!;
     await writeAll(jobs);
+    return jobs[idx]!;
   });
-  await writeQueue;
-  return updated;
 }
 
 export async function deleteJob(localJobId: string): Promise<void> {
-  writeQueue = writeQueue.then(async () => {
+  await serial(async () => {
     const jobs = await readAll();
     const filtered = jobs.filter((j) => j.localJobId !== localJobId);
     await writeAll(filtered);
   });
-  await writeQueue;
 }
