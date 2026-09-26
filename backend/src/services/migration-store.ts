@@ -30,7 +30,6 @@ export interface LocalMigrationJob {
   direction: string;
   sourceMigrationId: string;
   destMigrationId: string;
-  fromToken: string;
   endpointIds: string[];
   endpointHostnames: Record<string, string>;
   /**
@@ -43,6 +42,23 @@ export interface LocalMigrationJob {
   destSnapshot: SophosMigrationJob | null;
   lastPolledAt?: string;
   lastError?: string;
+}
+
+/**
+ * The receiver job's handshake token is a secret, needed only for the sender
+ * trigger. It is never stored, and both tenants return it on every job GET, so
+ * it is dropped from the API snapshots too. Jobs saved by earlier versions
+ * (field fromToken) lose it on the next read and write.
+ */
+function withoutTokens(job: LocalMigrationJob): LocalMigrationJob {
+  const { fromToken: _legacy, ...rest } = job as LocalMigrationJob & { fromToken?: string };
+  return { ...rest, sourceSnapshot: snapshotWithoutToken(rest.sourceSnapshot), destSnapshot: snapshotWithoutToken(rest.destSnapshot) };
+}
+
+function snapshotWithoutToken(snap: SophosMigrationJob | null | undefined): SophosMigrationJob | null {
+  if (!snap) return null;
+  const { token: _token, fromToken: _fromToken, ...rest } = snap;
+  return rest;
 }
 
 let writeQueue: Promise<void> = Promise.resolve();
@@ -76,7 +92,7 @@ async function withRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
 async function readAll(): Promise<LocalMigrationJob[]> {
   try {
     const raw = await withRetry("readAll", () => fs.readFile(jobsFile(), "utf8"));
-    return JSON.parse(raw) as LocalMigrationJob[];
+    return (JSON.parse(raw) as LocalMigrationJob[]).map(withoutTokens);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw err;
@@ -106,14 +122,14 @@ export async function getJob(localJobId: string): Promise<LocalMigrationJob | nu
 export async function createJob(
   init: Omit<LocalMigrationJob, "localJobId" | "createdAt" | "status" | "sourceSnapshot" | "destSnapshot">,
 ): Promise<LocalMigrationJob> {
-  const job: LocalMigrationJob = {
+  const job: LocalMigrationJob = withoutTokens({
     localJobId: randomUUID(),
     createdAt: new Date().toISOString(),
     status: "in-progress",
     sourceSnapshot: null,
     destSnapshot: null,
     ...init,
-  };
+  });
 
   writeQueue = writeQueue.then(async () => {
     const jobs = await readAll();
@@ -133,7 +149,7 @@ export async function updateJob(
     const jobs = await readAll();
     const idx = jobs.findIndex((j) => j.localJobId === localJobId);
     if (idx < 0) return;
-    jobs[idx] = { ...jobs[idx]!, ...patch };
+    jobs[idx] = withoutTokens({ ...jobs[idx]!, ...patch });
     updated = jobs[idx]!;
     await writeAll(jobs);
   });

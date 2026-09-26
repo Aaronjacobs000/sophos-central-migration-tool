@@ -3,7 +3,7 @@
  */
 
 import type { Request, Response, NextFunction } from "express";
-import { log } from "../log.js";
+import { log, maskSecrets } from "../log.js";
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function errorHandler(
@@ -12,7 +12,7 @@ export function errorHandler(
   res: Response,
   _next: NextFunction,
 ): void {
-  const message = err instanceof Error ? err.message : String(err);
+  const message = maskSecrets(err instanceof Error ? err.message : String(err));
   log.error(`[${req.method} ${req.path}] ${message}`);
   if (res.headersSent) return;
   res.status(500).json({ error: "internal_error", message });

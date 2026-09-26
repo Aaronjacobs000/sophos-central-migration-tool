@@ -153,6 +153,7 @@ data/                            # Created at run time, not committed
 - The server listens on **127.0.0.1 only**, so it is not reachable from the network.
 - Credentials are stored in **plain text** in `.env` at the repo root. Run the tool only on a trusted workstation with full-disk encryption, and do not commit, back up or sync `.env` to cloud drives. `.gitignore` excludes it.
 - The API never returns secrets. The credentials page shows masked values.
+- A device move's handshake token is used once, for the sender trigger. It is not saved in `data/migration-jobs.json`, and the Logs page, `/api/logs` and error messages mask it.
 - Copies and migrations can be run as a dry run first, which returns what would be created or changed without touching the destination.
 - Copies, clones and migrations are recorded in `data/audit.log` with a timestamp, ID, side, tenant ID, resource and result.
 - Deleting a policy, group or exclusion asks for confirmation twice. Overwriting a policy asks once.

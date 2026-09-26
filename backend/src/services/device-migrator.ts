@@ -33,7 +33,7 @@ import {
 } from "./migration-store.js";
 import { audit } from "./audit-log.js";
 import { checkMigrationWindow } from "./migration-window.js";
-import { log } from "../log.js";
+import { log, registerSecret } from "../log.js";
 import type { SophosEndpoint } from "../sophos/types/sophos.js";
 
 const FOURTEEN_DAYS_MS = 14 * 24 * 60 * 60 * 1000;
@@ -195,6 +195,7 @@ export async function startMigration(
   if (!handshakeToken) {
     throw new Error("Receiver job did not return a handshake token");
   }
+  registerSecret(handshakeToken);
   await audit({
     side: to.label,
     tenantId: to.tenantId,
@@ -247,7 +248,6 @@ export async function startMigration(
     jobName: req.jobName,
     sourceMigrationId: sender.id,
     destMigrationId: receiver.id,
-    fromToken: handshakeToken,
     endpointIds: acceptedEndpoints.map((e) => e.id),
     endpointHostnames: Object.fromEntries(
       acceptedEndpoints.map((e) => [e.id, e.hostname ?? ""]),
