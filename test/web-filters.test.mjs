@@ -161,17 +161,36 @@ test("policy clone dry run: reports the remap and writes nothing", async () => {
   assert.ok(res.adjustments.some((a) => /mapped web profile "Staff"/.test(a)));
 });
 
-test("policy clone: a profile missing on the destination drops the setting and says so", async () => {
+// The live API refuses a web control policy whose profile ID is left out
+// ("Invalid Web Profile Id", 26/09/2026), so the policy is not sent at all.
+test("policy clone: a profile missing on the destination stops the policy and says which to copy", async () => {
   seedPolicies();
   db.dst.profiles = db.dst.profiles.filter((p) => p.id !== "dp-staff");
   fake.reset();
-  const [res] = await migratePolicies({ policyIds: ["pol-1", "pol-2"] }).then((r) => [r[0], r[1]]);
-  const posts = fake.writes().filter((w) => w.path === "/endpoint/v1/policies");
-  assert.equal(posts[0].body.settings[PROFILE_KEY], undefined);
-  assert.equal(posts[0].body.settings[SCHEDULE_KEY], undefined);
-  assert.ok(res.adjustments.some((a) => /profile "Staff" is not on the destination/.test(a)));
-  assert.equal(posts[1].body.settings[PROFILE_KEY], undefined, "an ID unknown on the source is dropped too");
-  for (const a of res.adjustments) assert.doesNotMatch(a, /[\u2013\u2014]/);
+  const audited = (await readAudit(root)).length;
+  const res = await migratePolicies({ policyIds: ["pol-1", "pol-2"] });
+  assert.equal(fake.writes().length, 0);
+  assert.deepEqual(res.map((r) => [r.ok, r.action]), [[false, "create"], [false, "create"]]);
+  assert.match(res[0].error, /web profile "Staff" is not on the destination: copy it on the Web filtering page first/);
+  assert.match(res[1].error, /web profile wp-missing was not found on the source/);
+  for (const r of res) assert.doesNotMatch(r.error, /[\u2013\u2014]/);
+  assert.equal((await readAudit(root)).length, audited, "nothing written, nothing audited");
+
+  const [dry] = await migratePolicies({ policyIds: ["pol-1"], dryRun: true });
+  assert.deepEqual([dry.ok, dry.action], [false, "dry-run-create"]);
+  assert.match(dry.error, /"Staff" is not on the destination/);
+});
+
+test("policy clone: a schedule profile missing on the destination drops the schedule only", async () => {
+  seedPolicies();
+  db.dst.profiles = db.dst.profiles.filter((p) => p.id !== "dp-2");
+  fake.reset();
+  const [res] = await migratePolicies({ policyIds: ["pol-1"] });
+  assert.equal(res.ok, true);
+  const post = fake.writes().find((w) => w.path === "/endpoint/v1/policies");
+  assert.equal(post.body.settings[PROFILE_KEY].value, "dp-staff");
+  assert.equal(post.body.settings[SCHEDULE_KEY], undefined);
+  assert.ok(res.adjustments.some((a) => /dropped the web profile schedule: "Kiosk" is not on the destination/.test(a)));
 });
 
 test("policy clone: policies without a web profile make no profile lookups", async () => {

@@ -97,7 +97,7 @@
         <p>Copy site lists first, then profiles. A profile refers to site lists by ID, and the copy maps each one
           to the destination list with the same name; a rule whose list is missing is dropped and reported.</p>
         <p>When you clone a web control policy that uses a profile, the tool maps the profile ID to the destination
-          profile with the same name. With no such profile the setting is dropped and the result says so.</p>
+          profile with the same name. With no such profile the policy is not cloned, and the result names the profile to copy first.</p>
         <p>To undo a copy, delete the destination site list or profile from its row menu. A preview runs first,
           and the destination refuses while a policy uses the profile or a profile uses the list.</p>
       </section>

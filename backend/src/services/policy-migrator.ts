@@ -15,8 +15,8 @@
  *
  * Web control policies name their web filtering profile by ID. The source
  * tenant's IDs mean nothing on the destination, so the ID is mapped to the
- * destination profile with the same name, or the setting is dropped and
- * reported when there is none.
+ * destination profile with the same name. When there is none the policy is
+ * not written, and the result says which profile to copy first.
  */
 
 import { getPolicy, listPolicies, createPolicy, updatePolicy } from "../sophos/api/policies.js";
@@ -179,7 +179,21 @@ export async function migratePolicies(
       }
     }
 
-    await remapWebProfiles(body.settings, webProfiles, adjustments);
+    const unmapped = await remapWebProfiles(body.settings, webProfiles, adjustments);
+    if (unmapped) {
+      // Nothing is sent: the destination refuses the policy without its profile.
+      results[i] = {
+        sourceId,
+        sourceName: sourcePolicy.name,
+        destId: match?.id,
+        destName: match?.name,
+        ok: false,
+        action: req.dryRun ? (match ? "dry-run-overwrite" : "dry-run-create") : match ? "overwrite" : "create",
+        error: unmapped,
+        adjustments: adjustments.length ? adjustments : undefined,
+      };
+      continue;
+    }
 
     if (req.dryRun) {
       results[i] = {
@@ -290,15 +304,20 @@ export const WEB_PROFILE_SCHEDULES_SUFFIX = ".web-profile-schedules";
 /**
  * Point a policy's web profile at the destination. The profile ID setting
  * (endpoint.web-control.web-profile-id) is mapped by profile name. Any source
- * profile ID inside the schedules setting is mapped the same way. A profile
- * with no destination counterpart drops the setting, and every change is
- * added to adjustments.
+ * profile ID inside the schedules setting is mapped the same way. A schedule
+ * profile with no destination counterpart drops the schedule, and every
+ * change is added to adjustments.
+ *
+ * A profile ID with no destination counterpart returns the reason the policy
+ * can't be written: the destination refuses a web control policy that filters
+ * by web profile without a valid profile ID ("Invalid Web Profile Id",
+ * measured 26/09/2026), and every policy with a profile ID filters by one.
  */
 export async function remapWebProfiles(
   settings: Record<string, unknown> | undefined,
   loadMap: () => Promise<WebProfileMap>,
   adjustments: string[],
-): Promise<void> {
+): Promise<string | undefined> {
   if (!settings) return;
   const idKeys = Object.keys(settings).filter((k) => {
     const v = (settings[k] as { value?: unknown } | undefined)?.value;
@@ -326,17 +345,13 @@ export async function remapWebProfiles(
   for (const key of idKeys) {
     const setting = settings[key] as { value: string };
     const { name, destId } = destIdFor(setting.value);
-    if (destId) {
-      settings[key] = { ...setting, value: destId };
-      adjustments.push(`mapped web profile "${name}" to the destination profile with the same name`);
-    } else {
-      delete settings[key];
-      adjustments.push(
-        name
-          ? `dropped the web profile setting: profile "${name}" is not on the destination (copy it on the Web filtering page first, then clone again)`
-          : `dropped the web profile setting: profile ${setting.value} was not found on the source`,
-      );
+    if (!destId) {
+      return name
+        ? `web profile "${name}" is not on the destination: copy it on the Web filtering page first, then clone again`
+        : `web profile ${setting.value} was not found on the source, so there is no destination profile to point the policy at`;
     }
+    settings[key] = { ...setting, value: destId };
+    adjustments.push(`mapped web profile "${name}" to the destination profile with the same name`);
   }
 
   for (const key of scheduleKeys) {

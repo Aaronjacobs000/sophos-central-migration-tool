@@ -32,7 +32,7 @@ Compare opens one table of settings grouped by section, with readable labels (th
 
 Policy assignments cannot be migrated because the public API rejects every `appliesTo` write. Export assignments (CSV) lists them so you can reassign them by hand.
 
-When a web control policy points at a web filtering profile, the clone maps the profile ID to the destination profile with the same name. If the destination has no such profile, the setting is dropped and the result says so. The deep match and Compare show the profile by name, so a correct clone matches.
+When a web control policy points at a web filtering profile, the clone maps the profile ID to the destination profile with the same name. If the destination has no such profile, the policy is not cloned and the result names the profile to copy first, because Sophos refuses a web control policy without its profile. The deep match and Compare show the profile by name, so a correct clone matches.
 
 ### Web filtering
 
