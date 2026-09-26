@@ -4,8 +4,9 @@
  * of the last polled state, so the UI can resume monitoring after restart.
  *
  * Stored as a single JSON file at data/migration-jobs.json, with a copy in
- * data/migration-jobs.backup.json that a jobs file cut off by a crash is
- * recovered from (see writeAll).
+ * data/migration-jobs.auto-backup.json that a jobs file cut off by a crash is
+ * recovered from (see writeAll). The copy's name keeps it apart from a manual
+ * backup, which the tool would otherwise overwrite on its next save.
  *
  * File operations retry on EBUSY / EPERM / EACCES: OneDrive (and other
  * cloud-sync tools) and antivirus briefly lock files, which causes transient
@@ -170,7 +171,7 @@ function jobsFile(): string {
 }
 
 function backupFile(): string {
-  return path.join(getState().repoRoot, "data", "migration-jobs.backup.json");
+  return path.join(getState().repoRoot, "data", "migration-jobs.auto-backup.json");
 }
 
 /** Codes that indicate a transient file lock (OneDrive, antivirus, etc.). */
@@ -266,7 +267,7 @@ async function readAll(): Promise<{ jobs: LocalMigrationJob[]; from: ReadFrom }>
   }
   if (!recoveryLogged) {
     recoveryLogged = true;
-    log.emit("warn", "migration-store", `data/migration-jobs.json ${problem ?? "is missing"}, so the ${backup.length} jobs in data/migration-jobs.backup.json were used. The next save rewrites it.`);
+    log.emit("warn", "migration-store", `data/migration-jobs.json ${problem ?? "is missing"}, so the ${backup.length} jobs in data/migration-jobs.auto-backup.json were used. The next save rewrites it.`);
   }
   return { jobs: backup, from: "backup" };
 }

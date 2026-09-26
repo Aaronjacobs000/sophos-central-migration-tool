@@ -1,5 +1,5 @@
 // The job store in data/migration-jobs.json: reads queue behind saves, a save replaces the file whole, a file
-// cut off half way is recovered from data/migration-jobs.backup.json, and one failed save fails alone. Before
+// cut off half way is recovered from data/migration-jobs.auto-backup.json, and one failed save fails alone. Before
 // 26/09/2026 a read during a save could get half a file, and one failed save failed every later one until the
 // tool restarted.
 import { test, after } from "node:test";
@@ -17,7 +17,7 @@ const { getRingBuffer } = await import("../backend/dist/log.js");
 store.setRetryDelay(1);
 
 const jobsFile = path.join(root, "data", "migration-jobs.json");
-const backupFile = path.join(root, "data", "migration-jobs.backup.json");
+const backupFile = path.join(root, "data", "migration-jobs.auto-backup.json");
 const original = { rename: fsp.rename, open: fsp.open, writeFile: fsp.writeFile };
 after(() => Object.assign(fsp, original));
 
@@ -98,7 +98,7 @@ test("a jobs file cut off half way is recovered from the backup, and the next sa
 
   const listed = await store.listJobs();
   assert.deepEqual(listed.map((j) => j.localJobId), JSON.parse(whole).map((j) => j.localJobId));
-  assert.ok(getRingBuffer().some((e) => e.level === "warn" && /migration-jobs\.backup\.json/.test(e.message)), "the recovery is logged");
+  assert.ok(getRingBuffer().some((e) => e.level === "warn" && /migration-jobs\.auto-backup\.json/.test(e.message)), "the recovery is logged");
 
   const [job] = listed;
   await store.updateJob(job.localJobId, { jobName: "after the recovery" });

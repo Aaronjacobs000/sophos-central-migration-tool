@@ -172,6 +172,7 @@ docs/                            # README screenshots (made against the fake API
 
 data/                            # Created at run time, not committed
   migration-jobs.json            # Local migration jobs
+  migration-jobs.auto-backup.json # Copy saved with each job save, to recover a damaged jobs file
   job-credentials.json           # Each job's credentials, encrypted (key kept outside the repo)
   audit.log                      # Copies, clones, deletes and migrations
 
