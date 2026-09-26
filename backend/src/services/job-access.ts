@@ -20,7 +20,7 @@ import {
   type TenantContext,
   type TenantLabel,
 } from "../sophos/tenant-context.js";
-import { currentContexts, currentCredentials } from "../state.js";
+import { currentContexts, currentCredentials, getPartnerContext } from "../state.js";
 import { getMigrationJob } from "../sophos/api/migrations.js";
 import { log, maskSecrets, registerSecret } from "../log.js";
 import {
@@ -185,6 +185,82 @@ export function tenantOf(ctx: TenantContext): JobTenant {
   };
 }
 
+// ---------- names for tenants recorded without one ----------
+
+type JobTenants = NonNullable<LocalMigrationJob["tenants"]>;
+
+function contextName(tenantId: string, contexts: Array<TenantContext | null | undefined>): string | null {
+  for (const ctx of contexts) {
+    if (ctx?.tenantId !== tenantId) continue;
+    const name = (ctx.summary.displayName ?? ctx.summary.tenantName)?.trim();
+    if (name) return name;
+  }
+  return null;
+}
+
+/**
+ * A name for a tenant, from what the tool already knows, matched by tenant ID:
+ * the contexts a check just used (a partner credential's tenant list), the
+ * tool's current connection (its label, or the partner's tenant list), then
+ * another job that recorded the tenant with a name. Sophos gives a tenant
+ * credential no name for its own tenant, so this makes no call.
+ */
+export function knownTenantName(
+  tenantId: string,
+  contexts: Array<TenantContext | null | undefined> = [],
+  jobs: LocalMigrationJob[] = [],
+): string | null {
+  const cur = currentContexts();
+  const fromContexts = contextName(tenantId, [...contexts, cur.source, cur.dest]);
+  if (fromContexts) return fromContexts;
+  const partnerName = getPartnerContext()?.tenantResolver.getTenantInfo(tenantId)?.name?.trim();
+  if (partnerName && partnerName !== "self") return partnerName;
+  for (const j of jobs) {
+    for (const t of [j.tenants?.source, j.tenants?.dest]) {
+      if (t?.tenantId === tenantId && t.name?.trim()) return t.name.trim();
+    }
+  }
+  return null;
+}
+
+/**
+ * The job's tenants with any missing name filled in (knownTenantName). A
+ * recorded name is never replaced. Returns the same object when nothing was
+ * found, so callers can tell whether to save.
+ */
+export function withTenantNames(
+  tenants: JobTenants,
+  contexts: Array<TenantContext | null | undefined> = [],
+  jobs: LocalMigrationJob[] = [],
+): JobTenants {
+  const fill = (t: JobTenant): JobTenant => {
+    if (t.name?.trim()) return t;
+    const name = knownTenantName(t.tenantId, contexts, jobs);
+    return name ? { ...t, name } : t;
+  };
+  const source = fill(tenants.source);
+  const dest = fill(tenants.dest);
+  return source === tenants.source && dest === tenants.dest ? tenants : { source, dest };
+}
+
+/**
+ * Fill missing tenant names on saved jobs from what the tool knows, and save
+ * the ones that changed. No call to Sophos, so the Migrations list can do it
+ * for finished jobs, which are no longer checked. Returns the jobs as saved.
+ */
+export async function nameUnnamedTenants(jobs: LocalMigrationJob[]): Promise<LocalMigrationJob[]> {
+  const out: LocalMigrationJob[] = [];
+  for (const job of jobs) {
+    const named = job.tenants ? withTenantNames(job.tenants, [], jobs) : job.tenants;
+    if (named === job.tenants) {
+      out.push(job);
+      continue;
+    }
+    out.push((await updateJob(job.localJobId, { tenants: named })) ?? { ...job, tenants: named });
+  }
+  return out;
+}
+
 // ---------- storing, attaching and removing ----------
 
 /**
@@ -310,10 +386,12 @@ export async function attachCredentials(localJobId: string, input: AttachInput):
 
   const stored = await refs();
   forgetJobContexts(job);
+  // Jobs from earlier builds, and credentials entered by hand, carry no tenant names.
+  const tenants = withTenantNames(job.tenants ?? { source: tenantOf(source), dest: tenantOf(dest) }, [source, dest], await listJobs());
   let updated;
   try {
     updated = await updateJob(localJobId, {
-      tenants: job.tenants ?? { source: tenantOf(source), dest: tenantOf(dest) },
+      tenants,
       credentials: stored,
       monitor: { ...(job.monitor ?? { state: "ok" }), state: "ok", via: "stored", message: undefined },
     });

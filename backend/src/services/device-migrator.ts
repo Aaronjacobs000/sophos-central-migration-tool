@@ -27,6 +27,7 @@ import {
 import {
   createJob,
   getJob,
+  listJobs,
   updateJob,
   type EndpointGroupRef,
   type LocalMigrationJob,
@@ -44,6 +45,7 @@ import {
   releaseCredentials,
   storeCurrentCredentials,
   tenantOf,
+  withTenantNames,
 } from "./job-access.js";
 import { log, maskSecrets, registerSecret } from "../log.js";
 import type { SophosEndpoint } from "../sophos/types/sophos.js";
@@ -411,6 +413,8 @@ async function pollOnce(localJobId: string): Promise<LocalMigrationJob | null> {
     checkIns: checkIn.checkIns,
   };
   const problem = errors[0] ?? checkIn.error;
+  // Jobs from earlier builds, and credentials entered by hand, recorded no tenant names.
+  if (!problem && tenants) tenants = withTenantNames(tenants, [src, dst], await listJobs());
   const monitor: JobMonitor = problem
     ? monitorFail("error", problem, ctx.via)
     : { state: "ok", via: ctx.via, lastOkAt: now, lastTriedAt: now };

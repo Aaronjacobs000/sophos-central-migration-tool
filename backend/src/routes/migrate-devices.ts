@@ -25,7 +25,7 @@ import {
 } from "../services/device-migrator.js";
 import { listJobs, getJob } from "../services/migration-store.js";
 import { restoreGroupMembership, JobNotFoundError } from "../services/group-membership.js";
-import { attachCredentials, removeCredentials, AttachError, JobAccessError } from "../services/job-access.js";
+import { attachCredentials, removeCredentials, nameUnnamedTenants, AttachError, JobAccessError } from "../services/job-access.js";
 import { nextCheckDelayMs } from "../services/job-progress.js";
 import { publicJob, type PublicJob } from "../services/job-view.js";
 import { listMigrationJobs } from "../sophos/api/migrations.js";
@@ -94,7 +94,7 @@ migrateDevicesRouter.post("/migrate/devices", requireConfigured, async (req, res
 
 migrateDevicesRouter.get("/migrate/devices/jobs", async (_req, res, next) => {
   try {
-    const jobs = await listJobs();
+    const jobs = await nameUnnamedTenants(await listJobs());
     refreshInBackground(jobs);
     res.json({ items: jobs.map((j) => publicJob(j)) });
   } catch (err) {
@@ -114,7 +114,7 @@ migrateDevicesRouter.get("/migrate/devices/jobs/all", async (_req, res, next) =>
     const none = async (): Promise<SophosMigrationJob[]> => [];
 
     const [localJobs, srcApiJobs, dstApiJobs] = await Promise.all([
-      listJobs(),
+      listJobs().then(nameUnnamedTenants),
       src ? listMigrationJobs(src.client, src.tenantId).catch(none) : none(),
       dst ? listMigrationJobs(dst.client, dst.tenantId).catch(none) : none(),
     ]);
