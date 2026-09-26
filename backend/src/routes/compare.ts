@@ -13,9 +13,15 @@ import {
   listAllowedItems,
   listBlockedItems,
 } from "../sophos/api/exclusions.js";
+import { listProfiles } from "../sophos/api/web-filters.js";
 import { diff, summarize } from "../compare/json-diff.js";
 import { log } from "../log.js";
+import {
+  WEB_PROFILE_ID_SUFFIX,
+  WEB_PROFILE_SCHEDULES_SUFFIX,
+} from "../services/policy-migrator.js";
 import type { SophosPolicy } from "../sophos/types/migration.js";
+import type { TenantContext, TenantLabel } from "../sophos/tenant-context.js";
 
 export const compareRouter = Router();
 
@@ -312,6 +318,15 @@ export async function computeDeepMatch(): Promise<DeepPolicyMatchResult> {
     }
   }
 
+  // Web filtering profile names on both sides, looked up at most once per run
+  // and only when a policy refers to a profile.
+  let profileNamesPromise: Promise<[Map<string, string>, Map<string, string>]> | undefined;
+  const profileNames = () =>
+    (profileNamesPromise ??= Promise.all([
+      profileNamesById(src, "source"),
+      profileNamesById(dst, "dest"),
+    ]));
+
   // Concurrency-limited deep fetch + diff for the matched pairs.
   const queue = [...matchedPairs];
   const runOne = async (pair: { src: SophosPolicy; dst: SophosPolicy }) => {
@@ -320,10 +335,14 @@ export async function computeDeepMatch(): Promise<DeepPolicyMatchResult> {
         getPolicy(src.client, src.tenantId, pair.src.id),
         getPolicy(dst.client, dst.tenantId, pair.dst.id),
       ]);
-      const settingsChanges = diff(
-        srcFull.settings ?? {},
-        dstFull.settings ?? {},
-      );
+      let srcSettings = srcFull.settings ?? {};
+      let dstSettings = dstFull.settings ?? {};
+      if (refersToWebProfile(srcSettings) || refersToWebProfile(dstSettings)) {
+        const [srcNames, dstNames] = await profileNames();
+        srcSettings = webProfilesByName(srcSettings, srcNames);
+        dstSettings = webProfilesByName(dstSettings, dstNames);
+      }
+      const settingsChanges = diff(srcSettings, dstSettings);
       // Priority is left out: a clone lands at the bottom of the
       // destination's order, so its priority differs by design.
       const metaChanges = diff(
@@ -400,6 +419,71 @@ export async function computeDeepMatch(): Promise<DeepPolicyMatchResult> {
     matches,
     byType,
   };
+}
+
+/**
+ * A tenant's web filtering profile names by ID, trimmed and lower-cased the
+ * way the policy migrator matches them. A failed lookup gives an empty map,
+ * so that side's IDs are compared as they are and still show as a change.
+ */
+async function profileNamesById(
+  ctx: TenantContext,
+  side: TenantLabel,
+): Promise<Map<string, string>> {
+  try {
+    const profiles = await listProfiles(ctx.client, ctx.tenantId);
+    return new Map(profiles.map((p) => [p.id, p.name.trim().toLowerCase()]));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log.emit(
+      "warn",
+      "compare",
+      `web filtering profile lookup failed, so web profile IDs are compared as they are: ${message}`,
+      { side },
+    );
+    return new Map();
+  }
+}
+
+const isWebProfileKey = (key: string) =>
+  key.endsWith(WEB_PROFILE_ID_SUFFIX) || key.endsWith(WEB_PROFILE_SCHEDULES_SUFFIX);
+
+/** True when the web profile ID or schedule setting holds a value. */
+function refersToWebProfile(settings: Record<string, unknown>): boolean {
+  return Object.keys(settings).some((key) => {
+    if (!isWebProfileKey(key)) return false;
+    const v = (settings[key] as { value?: unknown } | undefined)?.value;
+    return Array.isArray(v) ? v.length > 0 : v !== undefined && v !== null && v !== "";
+  });
+}
+
+/**
+ * Web control policies name their web filtering profile by ID, in the web
+ * profile ID setting and inside the schedule, and a profile's ID differs on
+ * each tenant. Swap every ID the tenant knows for the profile's name so a
+ * correct clone compares equal. An ID the tenant doesn't know is left as it
+ * is, so it still shows as a change.
+ */
+function webProfilesByName(
+  settings: Record<string, unknown>,
+  nameById: Map<string, string>,
+): Record<string, unknown> {
+  const swap = (v: unknown): unknown => {
+    if (typeof v === "string") {
+      const name = nameById.get(v);
+      return name === undefined ? v : `web profile "${name}"`;
+    }
+    if (Array.isArray(v)) return v.map(swap);
+    if (v && typeof v === "object") {
+      return Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, inner]) => [k, swap(inner)]));
+    }
+    return v;
+  };
+  const out = { ...settings };
+  for (const key of Object.keys(out)) {
+    if (isWebProfileKey(key)) out[key] = swap(out[key]);
+  }
+  return out;
 }
 
 function setDiff<T>(source: T[], dest: T[], keyFn: (item: T) => string) {

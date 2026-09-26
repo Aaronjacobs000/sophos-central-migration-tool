@@ -281,8 +281,8 @@ export interface WebProfileMap {
   destIdByName: Map<string, string>;
 }
 
-const WEB_PROFILE_ID_SUFFIX = ".web-profile-id";
-const WEB_PROFILE_SCHEDULES_SUFFIX = ".web-profile-schedules";
+export const WEB_PROFILE_ID_SUFFIX = ".web-profile-id";
+export const WEB_PROFILE_SCHEDULES_SUFFIX = ".web-profile-schedules";
 
 /**
  * Point a policy's web profile at the destination. The profile ID setting
