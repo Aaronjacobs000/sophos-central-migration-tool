@@ -216,10 +216,12 @@ export function putCredential(kind: CredentialKind, cred: ApiCredential): Promis
 /**
  * Decrypt one entry. Null when the entry is gone; CredentialUnreadableError
  * when the key is missing or does not match (the data folder was moved to
- * another computer, or the key file was deleted).
+ * another computer, or the key file was deleted). Throws when neither the
+ * file nor its backup can be read (see readVault).
  */
 export async function getCredential(id: string): Promise<(ApiCredential & { kind: CredentialKind }) | null> {
-  // Queued behind saves, which rewrite the file: a read mid-save gets half of it.
+  // Queued behind saves. A save replaces the file whole, but one whose rename
+  // stays locked writes it in place, and a read then could get half of it.
   const entry = await serial(async () => (await readVault()).vault.entries.find((e) => e.id === id));
   if (!entry) return null;
   const key = await loadKey(false);
