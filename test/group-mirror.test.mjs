@@ -46,6 +46,20 @@ test("groups with an empty or missing description mirror without one", async () 
   assert.equal(posts[2].body.type, "server");
 });
 
+test("a second source group with a name mirrored in the same run is already there, in a dry run too", async () => {
+  srcGroups.push({ id: "sg-4", name: "FINANCE", type: "computer", description: "" });
+  try {
+    for (const dryRun of [true, false]) {
+      fake.reset();
+      const results = await mirrorGroups({ groupIds: ["sg-2", "sg-4", "sg-2"], dryRun });
+      assert.deepEqual(results.map((r) => r.action), dryRun ? ["dry-run-create", "skip-exists", "skip-exists"] : ["create", "skip-exists", "skip-exists"]);
+      assert.equal(fake.writes().length, dryRun ? 0 : 1, "before 26/09/2026 this made three groups");
+    }
+  } finally {
+    srcGroups.pop();
+  }
+});
+
 // ---- user groups ----
 
 const srcUserGroups = [
@@ -78,10 +92,10 @@ test("user groups: one already on the destination is skipped, the others are cre
   assert.deepEqual(audit.map((a) => [a.resource, a.ok, a.detail.name]), [["user-group", true, "IT admins"], ["user-group", false, "Contractors"]]);
 });
 
-test("user groups: a dry run writes nothing", async () => {
+test("user groups: a dry run writes nothing, and plans a name once", async () => {
   fake.reset();
-  const results = await mirrorUserGroups({ userGroupIds: ["su-1", "su-2"], dryRun: true });
-  assert.deepEqual(results.map((r) => r.action), ["skip-exists", "dry-run-create"]);
+  const results = await mirrorUserGroups({ userGroupIds: ["su-1", "su-2", "su-2"], dryRun: true });
+  assert.deepEqual(results.map((r) => r.action), ["skip-exists", "dry-run-create", "skip-exists"]);
   assert.deepEqual(fake.writes(), []);
 });
 

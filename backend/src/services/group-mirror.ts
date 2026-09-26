@@ -64,6 +64,7 @@ export async function mirrorGroups(req: MirrorGroupsRequest): Promise<MirrorGrou
     }
 
     if (req.dryRun) {
+      destNames.add(sourceGroup.name.toLowerCase());
       results.push({
         sourceId,
         sourceName: sourceGroup.name,
@@ -88,6 +89,8 @@ export async function mirrorGroups(req: MirrorGroupsRequest): Promise<MirrorGrou
         async () => (await listGroups(dst.client, dst.tenantId)).find((g) => g.name.toLowerCase() === name),
         "the group",
       );
+      // A second source group with this name ignoring case is then already there.
+      destNames.add(name);
       await auditOrWarn({
         side: "dest",
         tenantId: dst.tenantId,
@@ -161,6 +164,7 @@ export async function mirrorUserGroups(req: MirrorUserGroupsRequest): Promise<Mi
       continue;
     }
     if (req.dryRun) {
+      destNames.add(group.name.toLowerCase());
       results.push({ sourceId, sourceName: group.name, ok: true, action: "dry-run-create" });
       continue;
     }
