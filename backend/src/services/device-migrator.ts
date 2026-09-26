@@ -32,7 +32,7 @@ import {
   type EndpointGroupRef,
   type LocalMigrationJob,
 } from "./migration-store.js";
-import { audit, auditedDelete } from "./audit-log.js";
+import { auditOrWarn, auditedDelete } from "./audit-log.js";
 import { checkMigrationWindow } from "./migration-window.js";
 import { refreshCheckIns } from "./device-check-in.js";
 import { jobProgress } from "./job-progress.js";
@@ -206,7 +206,7 @@ export async function startMigration(
   try {
     receiver = await createReceiverJob(to.client, to.tenantId, receiverBody);
   } catch (err) {
-    await audit({
+    await auditOrWarn({
       side: to.label,
       tenantId: to.tenantId,
       action: "create",
@@ -226,7 +226,7 @@ export async function startMigration(
     throw new Error("Receiver job did not return a handshake token");
   }
   registerSecret(handshakeToken);
-  await audit({
+  await auditOrWarn({
     side: to.label,
     tenantId: to.tenantId,
     action: "create",
@@ -253,7 +253,7 @@ export async function startMigration(
       side: from.label as "source" | "dest",
       detail: { response: sender },
     });
-    await audit({
+    await auditOrWarn({
       side: from.label,
       tenantId: from.tenantId,
       action: "create",
@@ -269,7 +269,7 @@ export async function startMigration(
     });
   } catch (err) {
     if (!sender) {
-      await audit({
+      await auditOrWarn({
         side: from.label,
         tenantId: from.tenantId,
         action: "create",

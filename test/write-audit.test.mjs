@@ -15,6 +15,9 @@ import { startHttp } from "./helpers/http.mjs";
 
 const fake = createFakeSophos();
 const { root } = await bootApp(fake);
+const { setRetryDelay } = await import("../backend/dist/services/safe-files.js");
+const { getRingBuffer } = await import("../backend/dist/log.js");
+setRetryDelay(1);
 
 // The routers in the order server.ts mounts them.
 const serverSource = await readFile(new URL("../backend/src/server.ts", import.meta.url), "utf8");
@@ -196,4 +199,94 @@ test("a failed audit write fails that entry only, and the next entry is written"
   const resources = (await readAudit(root)).map((e) => e.resource);
   assert.ok(resources.includes("after-lock"));
   assert.ok(!resources.includes("while-locked"));
+});
+
+// Appends retry while OneDrive or antivirus holds data/audit.log. An entry that still can't be written doesn't turn
+// a write Sophos made into an error: the route returns Sophos's result with a warning, and the entry goes to the
+// tool's log. Before 26/09/2026 a failed append made the route report the write as failed, and a device move then
+// deleted the receiving job its sender trigger had already used.
+const auditFile = path.join(root, "data", "audit.log");
+const lockAudit = (times) => {
+  let calls = 0;
+  fsp.appendFile = async (file, ...rest) => {
+    if (path.resolve(String(file)) === auditFile && calls++ < times) throw Object.assign(new Error(`EBUSY: resource busy or locked, open '${file}'`), { code: "EBUSY" });
+    return appendFile(file, ...rest);
+  };
+  return () => calls;
+};
+const { appendFile } = fsp;
+after(() => { fsp.appendFile = appendFile; });
+const { audit } = await import("../backend/dist/services/audit-log.js");
+
+test("a lock on the audit log that clears within the retries: the entry is written and there is no warning", async () => {
+  refuse = () => false;
+  const calls = lockAudit(2);
+  let sent;
+  try {
+    sent = await send(WRITES["POST /:side/policies"]);
+  } finally {
+    fsp.appendFile = appendFile;
+  }
+  assert.equal(calls(), 3, "appended on the third try");
+  assert.equal(sent.res.status, 201);
+  assert.deepEqual(sent.entries.map((e) => [e.action, e.resource, e.resourceId, e.ok]), [["create", "policy", sent.res.body.id, true]]);
+  assert.equal(sent.res.headers["x-audit-warning"], undefined);
+  assert.ok(getRingBuffer().some((e) => e.section === "audit" && /append audit\.log: EBUSY, retry 1\/5/.test(e.message)));
+});
+
+test("an audit entry that can't be written leaves the write's result as it is, with a warning, and the entry in the tool's log", async () => {
+  refuse = () => false;
+  const before = await readFile(auditFile, "utf8");
+  const logStart = getRingBuffer().length;
+  lockAudit(Infinity);
+  const sent = {};
+  try {
+    for (const route of ["POST /:side/policies", "DELETE /:side/policies/:id", "POST /migrate/policies", "POST /migrate/devices"]) {
+      sent[route] = await send(WRITES[route]);
+    }
+  } finally {
+    fsp.appendFile = appendFile;
+  }
+  assert.equal(await readFile(auditFile, "utf8"), before, "the audit log is as it was");
+
+  const created = sent["POST /:side/policies"].res;
+  assert.equal(created.status, 201);
+  assert.match(created.body.id, /^new-/, "Sophos's result");
+  assert.match(created.headers["x-audit-warning"], /^The audit entry for this change couldn't be written to data\/audit\.log \(EBUSY\), usually because OneDrive or antivirus held the file\. The change itself is unaffected/);
+  assert.equal(sent["DELETE /:side/policies/:id"].res.status, 204);
+  assert.match(sent["DELETE /:side/policies/:id"].res.headers["x-audit-warning"], /couldn't be written/);
+  const copied = sent["POST /migrate/policies"].res;
+  assert.equal(copied.status, 200);
+  assert.ok(JSON.stringify(copied.body).includes('"ok":true') && !copied.text.includes("EBUSY"), "the copy is reported as done");
+  assert.match(copied.headers["x-audit-warning"], /couldn't be written/);
+
+  // A device move carries on past the receiving job's entry, and the receiving job is not deleted.
+  const moved = sent["POST /migrate/devices"];
+  assert.equal(moved.res.status, 201, moved.res.text.slice(0, 200));
+  assert.deepEqual(moved.writes.map((w) => w.method).sort(), ["POST", "PUT"]);
+  assert.match(moved.res.headers["x-audit-warning"], /^2 audit entries for these changes couldn't be written/);
+
+  const lines = getRingBuffer().slice(logStart).filter((e) => e.section === "audit" && e.level === "error");
+  assert.equal(lines.length, 5, "one line per entry");
+  assert.match(lines[0].message, /^Couldn't write an audit entry to data\/audit\.log \(EBUSY\): create policy new-\S+ on the dest tenant, done\./);
+  assert.equal(lines[0].detail.entry.tenantId, DST.tenantId);
+
+  await audit({ side: "dest", tenantId: DST.tenantId, action: "create", resource: "after-audit-lock", ok: true });
+  assert.ok((await readAudit(root)).some((e) => e.resource === "after-audit-lock"), "the next entry is written");
+});
+
+test("a write Sophos refuses still reports Sophos's error when its audit entry can't be written", async () => {
+  refuse = () => true;
+  lockAudit(Infinity);
+  let sent;
+  try {
+    sent = await send(WRITES["POST /:side/policies"]);
+  } finally {
+    fsp.appendFile = appendFile;
+    refuse = () => false;
+  }
+  assert.notEqual(sent.res.status, 201);
+  assert.match(sent.res.text, /400|refused by the test/);
+  assert.doesNotMatch(sent.res.text, /EBUSY/);
+  assert.match(sent.res.headers["x-audit-warning"], /couldn't be written/);
 });

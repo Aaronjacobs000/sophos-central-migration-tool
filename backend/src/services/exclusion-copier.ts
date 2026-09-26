@@ -25,7 +25,7 @@ import {
 } from "../sophos/api/exclusions.js";
 import { listLocalSites, createLocalSite } from "../sophos/api/web-control.js";
 import { requireContext } from "../state.js";
-import { audit } from "./audit-log.js";
+import { auditOrWarn } from "./audit-log.js";
 
 export type ExclusionType =
   | "scanning"
@@ -136,7 +136,7 @@ export async function copyExclusions(
             ? itemKey({ ...item, id: created.id ?? "" })
             : keyOf(item),
         );
-        await audit({
+        await auditOrWarn({
           side: "dest",
           tenantId: dst.tenantId,
           action: "create",
@@ -154,7 +154,7 @@ export async function copyExclusions(
         });
       } catch (err) {
         const msg = errMsg(err);
-        await audit({
+        await auditOrWarn({
           side: "dest",
           tenantId: dst.tenantId,
           action: "create",
@@ -289,7 +289,7 @@ async function copyTlsExcludedWebsites(
     try {
       const res = await addTlsExcludedWebsites(dst.client, dst.tenantId, batch);
       const added = new Set((res.added ?? batch).map((w) => keyFor(type, w)));
-      await audit({
+      await auditOrWarn({
         side: "dest",
         tenantId: dst.tenantId,
         action: "update",
@@ -305,7 +305,7 @@ async function copyTlsExcludedWebsites(
       }
     } catch (err) {
       const msg = errMsg(err);
-      await audit({
+      await auditOrWarn({
         side: "dest",
         tenantId: dst.tenantId,
         action: "update",

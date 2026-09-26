@@ -10,7 +10,7 @@
 import { getGroup, listGroups, createGroup } from "../sophos/api/groups.js";
 import { listUserGroups, createUserGroup } from "../sophos/api/user-groups.js";
 import { requireContext } from "../state.js";
-import { audit } from "./audit-log.js";
+import { auditOrWarn } from "./audit-log.js";
 import type { SophosEndpointGroup } from "../sophos/types/migration.js";
 
 export interface MirrorGroupsRequest {
@@ -80,7 +80,7 @@ export async function mirrorGroups(req: MirrorGroupsRequest): Promise<MirrorGrou
         type: sourceGroup.type,
         endpointType: sourceGroup.endpointType,
       });
-      await audit({
+      await auditOrWarn({
         side: "dest",
         tenantId: dst.tenantId,
         action: "create",
@@ -98,7 +98,7 @@ export async function mirrorGroups(req: MirrorGroupsRequest): Promise<MirrorGrou
       });
     } catch (err) {
       const msg = errMsg(err);
-      await audit({
+      await auditOrWarn({
         side: "dest",
         tenantId: dst.tenantId,
         action: "create",
@@ -159,7 +159,7 @@ export async function mirrorUserGroups(req: MirrorUserGroupsRequest): Promise<Mi
     try {
       const created = await createUserGroup(dst.client, dst.tenantId, body);
       destNames.add(group.name.toLowerCase());
-      await audit({
+      await auditOrWarn({
         side: "dest",
         tenantId: dst.tenantId,
         action: "create",
@@ -171,7 +171,7 @@ export async function mirrorUserGroups(req: MirrorUserGroupsRequest): Promise<Mi
       results.push({ sourceId, sourceName: group.name, destId: created.id, ok: true, action: "create" });
     } catch (err) {
       const msg = errMsg(err);
-      await audit({
+      await auditOrWarn({
         side: "dest",
         tenantId: dst.tenantId,
         action: "create",

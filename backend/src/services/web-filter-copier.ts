@@ -13,7 +13,7 @@
  */
 
 import { requireContext } from "../state.js";
-import { audit } from "./audit-log.js";
+import { auditOrWarn } from "./audit-log.js";
 import {
   listSiteLists,
   listSites,
@@ -102,7 +102,7 @@ export async function copyWebFilters(req: CopyWebFiltersRequest): Promise<WebFil
       const created = await createSiteList(dst.client, dst.tenantId, body);
       listMap.set(id, created.id);
       dstListByName.set(nameKey(list.name), created);
-      await audit({
+      await auditOrWarn({
         side: "dest",
         tenantId: dst.tenantId,
         action: "create",
@@ -114,7 +114,7 @@ export async function copyWebFilters(req: CopyWebFiltersRequest): Promise<WebFil
       results.push({ kind: "site-list", sourceId: id, sourceName: list.name, destId: created.id, ok: true, action: "create", note: `${sites.length} site${sites.length === 1 ? "" : "s"}` });
     } catch (err) {
       const msg = errMsg(err);
-      await audit({
+      await auditOrWarn({
         side: "dest",
         tenantId: dst.tenantId,
         action: "create",
@@ -164,7 +164,7 @@ export async function copyWebFilters(req: CopyWebFiltersRequest): Promise<WebFil
     try {
       const created = await createProfile(dst.client, dst.tenantId, body);
       dstProfileByName.set(nameKey(profile.name), created);
-      await audit({
+      await auditOrWarn({
         side: "dest",
         tenantId: dst.tenantId,
         action: "create",
@@ -176,7 +176,7 @@ export async function copyWebFilters(req: CopyWebFiltersRequest): Promise<WebFil
       results.push({ kind: "profile", sourceId: id, sourceName: profile.name, destId: created.id, ok: true, action: "create", ...(adjustments.length ? { adjustments } : {}) });
     } catch (err) {
       const msg = errMsg(err);
-      await audit({
+      await auditOrWarn({
         side: "dest",
         tenantId: dst.tenantId,
         action: "create",

@@ -33,7 +33,7 @@ import { listLocalSites } from "../sophos/api/web-control.js";
 import { listProfiles } from "../sophos/api/web-filters.js";
 import { listRuntimeDetectionProfiles } from "../sophos/api/runtime-detection.js";
 import { requireContext } from "../state.js";
-import { audit } from "./audit-log.js";
+import { auditOrWarn } from "./audit-log.js";
 import { pairPolicy } from "../compare/policy-pairing.js";
 import type { SophosPolicy } from "../sophos/types/migration.js";
 
@@ -265,7 +265,7 @@ export async function migratePolicies(
           throw err;
         }
       }
-      await audit({
+      await auditOrWarn({
         side: "dest",
         tenantId: dst.tenantId,
         action: match ? "update" : "create",
@@ -290,7 +290,7 @@ export async function migratePolicies(
       };
     } catch (err) {
       const msg = errMsg(err);
-      await audit({
+      await auditOrWarn({
         side: "dest",
         tenantId: dst.tenantId,
         action: match ? "update" : "create",

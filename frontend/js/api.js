@@ -4,6 +4,8 @@
 // the welcome wizard unless we're already there. Callers should treat
 // errors as exceptions.
 
+import { toast } from "./toast.js";
+
 const WIZARD_PATH = "/welcome.html";
 
 function isWizardPage() {
@@ -18,6 +20,9 @@ async function request(method, path, body) {
   }
 
   const res = await fetch(path, init);
+  // Sophos answered a write, but its audit entry could not be written.
+  const auditWarning = res.headers.get("X-Audit-Warning");
+  if (auditWarning) toast(auditWarning, "warn", 12000);
   const text = await res.text();
   let data = null;
   if (text) {

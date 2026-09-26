@@ -19,7 +19,7 @@
  * (job-access.ts), so this never writes to whatever pair the tool points at now.
  */
 
-import { audit } from "./audit-log.js";
+import { auditOrWarn } from "./audit-log.js";
 import { verifiedContextsForJob } from "./job-access.js";
 import { getJob, type EndpointGroupRef } from "./migration-store.js";
 import { listMigrationEndpointStatuses, type MigrationEndpointStatus } from "../sophos/api/migrations.js";
@@ -195,7 +195,7 @@ export async function restoreGroupMembership(
           for (const id of res.errors?.endpointsOfWrongType ?? []) problems.set(id, "the device type does not match the group type");
           // Without an addedEndpoints list, treat every ID without an error as added.
           if (!res.addedEndpoints) for (const id of batch) if (!problems.has(id)) addedIds.add(id);
-          await audit({
+          await auditOrWarn({
             side: receivingSide,
             tenantId: to.tenantId,
             action: "update",
@@ -208,7 +208,7 @@ export async function restoreGroupMembership(
         } catch (err) {
           failure = err instanceof Error ? err.message : String(err);
           for (const id of batch) problems.set(id, /\b409\b/.test(failure) ? "the group is synced from Active Directory, so the API cannot add to it" : failure);
-          await audit({
+          await auditOrWarn({
             side: receivingSide,
             tenantId: to.tenantId,
             action: "update",

@@ -582,6 +582,7 @@ input:disabled { cursor: not-allowed; opacity: 0.5; }
 .toast-ok { border-left-color: var(--ok); }
 .toast-err { border-left-color: var(--bad); }
 .toast-info { border-left-color: var(--accent); }
+.toast-warn { border-left-color: var(--warn); }
 .toast-fade { opacity: 0; }
 
 /* ================= modal ================= */

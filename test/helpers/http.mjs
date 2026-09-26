@@ -8,8 +8,10 @@ import { once } from "node:events";
 export async function startHttp(mounts) {
   const express = (await import("express")).default;
   const { errorHandler } = await import("../../backend/dist/middleware/error-handler.js");
+  const { auditWarnings } = await import("../../backend/dist/services/audit-log.js");
   const app = express();
   app.use(express.json());
+  app.use(auditWarnings);
   for (const router of mounts) app.use("/api", router);
   app.use(errorHandler);
   const server = app.listen(0, "127.0.0.1");
@@ -26,7 +28,7 @@ export async function startHttp(mounts) {
         res.on("end", () => {
           let json = null;
           try { json = JSON.parse(text); } catch {}
-          resolve({ status: res.statusCode, text, body: json });
+          resolve({ status: res.statusCode, headers: res.headers, text, body: json });
         });
       });
       req.on("error", reject);

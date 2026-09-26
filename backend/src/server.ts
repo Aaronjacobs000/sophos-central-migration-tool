@@ -6,6 +6,7 @@ import dotenv from "dotenv";
 import { initState } from "./state.js";
 import { log } from "./log.js";
 import { errorHandler } from "./middleware/error-handler.js";
+import { auditWarnings } from "./services/audit-log.js";
 import { statusRouter } from "./routes/status.js";
 import { credentialsRouter } from "./routes/credentials.js";
 import { policiesRouter } from "./routes/policies.js";
@@ -39,6 +40,8 @@ async function main() {
 
   const app = express();
   app.use(express.json({ limit: "2mb" }));
+  // After the body parser, so every route runs inside it.
+  app.use(auditWarnings);
 
   // --- Always-available API (no requireConfigured guard) ---
   app.use("/api", statusRouter);

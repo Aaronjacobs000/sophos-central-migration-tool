@@ -10,7 +10,7 @@
  */
 
 import { requireContext } from "../state.js";
-import { audit } from "./audit-log.js";
+import { auditOrWarn } from "./audit-log.js";
 import {
   listSiteLists,
   listProfiles,
@@ -71,12 +71,12 @@ export async function deleteWebFilters(req: DeleteWebFiltersRequest): Promise<We
     }
     try {
       await (kind === "profile" ? deleteProfile : deleteSiteList)(dst.client, dst.tenantId, id);
-      await audit({ side: "dest", tenantId: dst.tenantId, action: "delete", resource: RESOURCE[kind], resourceId: id, ok: true, detail: { name } });
+      await auditOrWarn({ side: "dest", tenantId: dst.tenantId, action: "delete", resource: RESOURCE[kind], resourceId: id, ok: true, detail: { name } });
       results.push({ kind, id, name, ok: true, action });
       return true;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      await audit({ side: "dest", tenantId: dst.tenantId, action: "delete", resource: RESOURCE[kind], resourceId: id, ok: false, error: msg, detail: { name } });
+      await auditOrWarn({ side: "dest", tenantId: dst.tenantId, action: "delete", resource: RESOURCE[kind], resourceId: id, ok: false, error: msg, detail: { name } });
       results.push({ kind, id, name, ok: false, action, error: msg });
       return false;
     }
