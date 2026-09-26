@@ -65,7 +65,7 @@ async function load() {
 function renderHeader() {
   const lead = state.destPolicy
     ? `Comparing <strong>${escapeHtml(state.sourcePolicy.name)}</strong> on the source and the destination.`
-    : `Source policy <strong>${escapeHtml(state.sourcePolicy.name)}</strong> has no matching destination policy.${state.ambiguous ? " More than one policy matches its name ignoring case, so none is paired." : ""}`;
+    : `Source policy <strong>${escapeHtml(state.sourcePolicy.name)}</strong> has no matching destination policy.${state.ambiguous ? " More than one policy matches its name ignoring case, so none is paired, and a clone would add yet another. Rename them so each name is unique ignoring case, then compare again." : ""}`;
   document.getElementById("page-lead").innerHTML = lead;
 
   const summary = summarizeEntries(state.entries);
@@ -84,16 +84,17 @@ function renderHeader() {
         <h2 class="compare-title">${escapeHtml(state.sourcePolicy.name)}</h2>
         <div class="compare-meta-row">
           <code>${escapeHtml(state.sourcePolicy.type)}</code>
-          ${state.destPolicy ? `<span class="hint">${matchedBy()}</span>` : `<span class="tag tag-src">No destination match</span>`}
+          ${state.destPolicy ? `<span class="hint">${matchedBy()}</span>` : state.ambiguous ? `<span class="tag tag-warn">Ambiguous name</span>` : `<span class="tag tag-src">No destination match</span>`}
         </div>
       </div>
-      <button id="clone-btn" class="btn btn-primary">${escapeHtml(cloneLabel)}</button>
+      ${state.ambiguous && !state.destPolicy ? "" : `<button id="clone-btn" class="btn btn-primary">${escapeHtml(cloneLabel)}</button>`}
     </header>
     ${summaryHtml}
     ${metaRows}
   `;
 
-  document.getElementById("clone-btn").addEventListener("click", cloneToDest);
+  // No clone when the name is ambiguous: the destination may hold this policy under another case already.
+  document.getElementById("clone-btn")?.addEventListener("click", cloneToDest);
 
   // Show the compare card if we have a destination to compare against
   if (state.destPolicy) {

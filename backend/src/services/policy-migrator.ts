@@ -25,7 +25,9 @@
  * that name the policy is not written, and the result names the profile.
  *
  * An application control list longer than the API accepts is not written
- * either, and the result gives the count (see oversizedAppLists).
+ * either, and the result gives the count (see oversizedAppLists). Nor is a
+ * policy whose name matches more than one policy ignoring case (pairPolicy's
+ * "ambiguous"): the destination may hold it under another case already.
  */
 
 import { getPolicy, listPolicies, createPolicy, updatePolicy } from "../sophos/api/policies.js";
@@ -152,7 +154,21 @@ export async function migratePolicies(
     }
     const sourcePolicy = got;
 
-    const match = pairPolicy(sourcePolicy, sourceExisting, destExisting).dest;
+    const { dest: match, ambiguous } = pairPolicy(sourcePolicy, sourceExisting, destExisting);
+
+    // Several policies share the name ignoring case, so the destination may
+    // already hold this policy under another case. A clone would add yet
+    // another; nothing is sent.
+    if (ambiguous) {
+      results[i] = {
+        sourceId,
+        sourceName: sourcePolicy.name,
+        ok: false,
+        action: req.dryRun ? "dry-run-create" : "create",
+        error: `more than one policy of this type matches "${sourcePolicy.name}" ignoring case, so the tool can't tell which destination policy is its copy and did not clone it: rename them so each name is unique ignoring case, then try again`,
+      };
+      continue;
+    }
 
     if (match && !req.overwrite) {
       results[i] = {

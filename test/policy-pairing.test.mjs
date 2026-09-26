@@ -135,13 +135,31 @@ test("Compare: opens the policy paired ignoring case, and says why an ambiguous 
   assert.equal(res.note, "no matching destination policy found");
 });
 
-test("clone: a policy paired ignoring case is already there, an ambiguous one is created", async () => {
+test("clone: a policy paired ignoring case is already there, an ambiguous one is not cloned and says why", async () => {
   seed();
   fake.reset();
   const res = await migratePolicies({ policyIds: ["s1", "s2"] });
-  assert.deepEqual(res.map((r) => `${r.sourceId} ${r.action}`), ["s1 skip-exists", "s2 create"]);
+  assert.deepEqual(res.map((r) => `${r.sourceId} ${r.action} ${r.ok}`), ["s1 skip-exists true", "s2 create false"]);
   assert.equal(res[0].destId, "d1");
-  assert.deepEqual(fake.writes().map((w) => `${w.method} ${w.body.name}`), ["POST Finance"]);
+  assert.match(res[1].error, /^more than one policy of this type matches "Finance" ignoring case, so the tool can't tell which destination policy is its copy and did not clone it/);
+  assert.deepEqual(fake.writes(), [], "before 26/09/2026 this made a third Finance policy");
+
+  // Nor is it overwritten, and a dry run says the same.
+  for (const opts of [{ overwrite: true }, { dryRun: true }]) {
+    const [r] = await migratePolicies({ policyIds: ["s2"], ...opts });
+    assert.equal(r.ok, false);
+    assert.match(r.error, /matches "Finance" ignoring case/);
+  }
+  assert.deepEqual(fake.writes(), []);
+});
+
+test("Compare and the Policies page offer no Clone for an ambiguous name", async () => {
+  const compare = await readFile(new URL("../frontend/js/page-policy-compare.js", import.meta.url), "utf8");
+  assert.match(compare, /\$\{state\.ambiguous && !state\.destPolicy \? "" : `<button id="clone-btn"/);
+  assert.match(compare, /getElementById\("clone-btn"\)\?\.addEventListener/);
+  assert.match(compare, /a clone would add yet another/);
+  const policies = await readFile(new URL("../frontend/js/page-policies.js", import.meta.url), "utf8");
+  assert.match(policies, /const action = inDest \|\| ambiguous\s*\?\s*`<button class="btn btn-small" data-compare=/);
 });
 
 test("overwrite: writes to the policy Compare paired, ignoring case", async () => {

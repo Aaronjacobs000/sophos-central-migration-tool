@@ -319,7 +319,8 @@ function renderProductSection(type, srcList, dstList) {
     const checked = state.selectedSource.has(p.id) ? "checked" : "";
     const matchInfo = lookupMatch(p, "source");
     const statusBadge = renderStatusBadge(matchInfo, inDest);
-    const action = inDest
+    // An ambiguous name gets Compare, which says why it has no pair, not Clone, which would add yet another.
+    const action = inDest || ambiguous
       ? `<button class="btn btn-small" data-compare="${escapeAttr(p.id)}">Compare</button>`
       : `<button class="btn btn-small btn-primary" data-clone="${escapeAttr(p.id)}">Clone</button>`;
     return `
