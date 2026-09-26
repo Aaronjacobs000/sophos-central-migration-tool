@@ -167,7 +167,7 @@ test("create routes refuse a post another site could send, and an empty JSON bod
   }
   assert.deepEqual(fake.writes(), []);
 
-  // The Groups page's user group mirror still reaches Sophos.
+  // A JSON post still reaches Sophos.
   const created = await http.post("/api/dest/user-groups", { name: "Finance users" });
   assert.equal(created.status, 201);
   assert.deepEqual(fake.writes().map((w) => [w.tenant, w.method, w.path, w.body]), [["dst", "POST", "/common/v1/directory/user-groups", { name: "Finance users" }]]);

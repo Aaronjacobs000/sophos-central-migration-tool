@@ -1,5 +1,6 @@
 /**
- * Mirrors endpoint groups from source to destination by name + metadata.
+ * Mirrors endpoint groups and user groups from source to destination by name
+ * + metadata.
  *
  * IMPORTANT: membership is NOT copied. Source endpoint IDs are meaningless
  * in the destination tenant. Devices reconstitute group membership after
@@ -7,6 +8,7 @@
  */
 
 import { getGroup, listGroups, createGroup } from "../sophos/api/groups.js";
+import { listUserGroups, createUserGroup } from "../sophos/api/user-groups.js";
 import { requireContext } from "../state.js";
 import { audit } from "./audit-log.js";
 import type { SophosEndpointGroup } from "../sophos/types/migration.js";
@@ -112,6 +114,73 @@ export async function mirrorGroups(req: MirrorGroupsRequest): Promise<MirrorGrou
         action: "create",
         error: msg,
       });
+    }
+  }
+
+  return results;
+}
+
+export interface MirrorUserGroupsRequest {
+  userGroupIds: string[];
+  dryRun?: boolean;
+}
+
+/**
+ * Mirrors user groups by name and description, skipping any whose name is
+ * already on the destination, and audits each create, as for endpoint groups.
+ */
+export async function mirrorUserGroups(req: MirrorUserGroupsRequest): Promise<MirrorGroupResult[]> {
+  const src = requireContext("source");
+  const dst = requireContext("dest");
+
+  const [sourceGroups, destExisting] = await Promise.all([
+    listUserGroups(src.client, src.tenantId),
+    listUserGroups(dst.client, dst.tenantId),
+  ]);
+  const sourceById = new Map(sourceGroups.map((g) => [g.id, g]));
+  const destNames = new Set(destExisting.map((g) => g.name.toLowerCase()));
+  const results: MirrorGroupResult[] = [];
+
+  for (const sourceId of req.userGroupIds) {
+    const group = sourceById.get(sourceId);
+    if (!group) {
+      results.push({ sourceId, sourceName: "(unknown)", ok: false, action: "create", error: "source user group not found" });
+      continue;
+    }
+    if (destNames.has(group.name.toLowerCase())) {
+      results.push({ sourceId, sourceName: group.name, ok: true, action: "skip-exists" });
+      continue;
+    }
+    if (req.dryRun) {
+      results.push({ sourceId, sourceName: group.name, ok: true, action: "dry-run-create" });
+      continue;
+    }
+    const body = { name: group.name, ...(group.description?.trim() ? { description: group.description } : {}) };
+    try {
+      const created = await createUserGroup(dst.client, dst.tenantId, body);
+      destNames.add(group.name.toLowerCase());
+      await audit({
+        side: "dest",
+        tenantId: dst.tenantId,
+        action: "create",
+        resource: "user-group",
+        resourceId: created.id,
+        ok: true,
+        detail: { sourceId, name: group.name },
+      });
+      results.push({ sourceId, sourceName: group.name, destId: created.id, ok: true, action: "create" });
+    } catch (err) {
+      const msg = errMsg(err);
+      await audit({
+        side: "dest",
+        tenantId: dst.tenantId,
+        action: "create",
+        resource: "user-group",
+        ok: false,
+        error: msg,
+        detail: { sourceId, name: group.name },
+      });
+      results.push({ sourceId, sourceName: group.name, ok: false, action: "create", error: msg });
     }
   }
 

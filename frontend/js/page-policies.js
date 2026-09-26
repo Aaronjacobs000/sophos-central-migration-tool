@@ -4,7 +4,7 @@ import { toast } from "./toast.js";
 import { getCachedSection, refreshSection } from "./preload-client.js";
 import { makeSortable } from "./sortable.js";
 import { icon } from "./icons.js";
-import { rowMenu, wireRowMenus, stackBar, onDestCell, ON_DEST_HEADER } from "./ui.js";
+import { rowMenu, wireRowMenus, stackBar, onDestCell, ON_DEST_HEADER, plural, resultsModal, outcomeOf, countOutcomes } from "./ui.js";
 
 // Friendly labels for known Sophos endpoint policy types. Anything not in
 // this map falls back to title-casing the raw type slug.
@@ -482,9 +482,7 @@ function wireRows() {
         const res = await api.post("/api/migrate/policies", {
           policyIds: [id],
         });
-        const ok = res.results?.filter((r) => r.ok).length ?? 0;
-        const failed = res.results?.filter((r) => !r.ok).length ?? 0;
-        toast(`Cloned ${ok} / failed ${failed}${summarizeAssignments(res.results)}`, failed ? "err" : "ok");
+        reportClone(res.results ?? []);
         await refreshSection("dest", "policies").catch(() => {});
         await loadSide("dest");
         loadDeepMatch(true);
@@ -540,9 +538,7 @@ function wireBasket() {
       const res = await api.post("/api/migrate/policies", {
         policyIds: ids,
       });
-      const ok = res.results?.filter((r) => r.ok).length ?? 0;
-      const failed = res.results?.filter((r) => !r.ok).length ?? 0;
-      toast(`Cloned ${ok} / failed ${failed}${summarizeAssignments(res.results)}`, failed ? "err" : "ok");
+      reportClone(res.results ?? []);
       state.selectedSource.clear();
       renderBasket();
       await refreshSection("dest", "policies").catch(() => {});
@@ -552,6 +548,32 @@ function wireBasket() {
     } catch (err) {
       toast(err.message || "Clone failed", "err");
     }
+  });
+}
+
+/**
+ * A short message and the results list for a clone: each policy tagged
+ * created, already there or failed, with notes on settings changed to fit.
+ */
+function reportClone(results) {
+  const n = countOutcomes(results);
+  toast(`Cloned ${n.created} / failed ${n.failed}${summarizeAssignments(results)}`, n.failed ? "err" : "ok");
+  const sourceById = new Map((Array.isArray(state.source) ? state.source : []).map((p) => [p.id, p]));
+  const byProduct = new Map();
+  for (const r of results) {
+    const label = productLabel(sourceById.get(r.sourceId)?.type ?? "unknown");
+    if (!byProduct.has(label)) byProduct.set(label, []);
+    byProduct.get(label).push({
+      outcome: outcomeOf(r),
+      text: sourceById.get(r.sourceId)?.name ?? r.sourceName,
+      error: r.error,
+      notes: r.adjustments,
+    });
+  }
+  resultsModal({
+    title: "Clone results",
+    summary: `${plural(n.created, "policy", "policies")} created on the destination. Each write is in data/audit.log.`,
+    groups: [...byProduct].sort(([a], [b]) => a.localeCompare(b)).map(([title, rows]) => ({ title, rows })),
   });
 }
 

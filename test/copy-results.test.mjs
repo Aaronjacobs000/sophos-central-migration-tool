@@ -36,3 +36,31 @@ test("exclusions: the copy message counts created items, as the list does", asyn
   const list = js.slice(js.indexOf("function showResults"));
   assert.match(list, /countOutcomes\(results\)/);
 });
+
+test("groups: the mirror lists every group, counted as the list tags them", async () => {
+  const js = await page("page-groups.js");
+  const mirror = js.slice(js.indexOf('getElementById("basket-mirror")'), js.indexOf("function esc("));
+  assert.match(mirror, /mirror\("\/api\/migrate\/groups", \{ groupIds: epIds \}/);
+  // User groups go through the route that skips ones already there and audits each create.
+  assert.match(mirror, /mirror\("\/api\/migrate\/user-groups", \{ userGroupIds: ugIds \}/);
+  assert.doesNotMatch(mirror, /\/api\/dest\/user-groups/);
+  assert.match(mirror, /const n = countOutcomes\(\[\.\.\.endpoint, \.\.\.user\]\);\s*toast\(`Mirrored \$\{n\.created\} \/ failed \$\{n\.failed\}`/);
+  assert.match(mirror, /showResults\(endpoint, user\);/);
+  const list = js.slice(js.indexOf("function showResults"));
+  assert.match(list, /outcome: outcomeOf\(r\)/);
+  assert.match(list, /resultsModal\(\{/);
+  assert.match(list, /plural\(n\.created, "group"\)/);
+});
+
+test("policies: both clone buttons show the results list", async () => {
+  const js = await page("page-policies.js");
+  assert.equal([...js.matchAll(/api\.post\("\/api\/migrate\/policies"/g)].length, 2);
+  assert.equal([...js.matchAll(/reportClone\(res\.results \?\? \[\]\);/g)].length, 2);
+  assert.doesNotMatch(js, /filter\(\(r\) => r\.ok\)/);
+  const report = js.slice(js.indexOf("function reportClone"), js.indexOf("function summarizeAssignments"));
+  assert.match(report, /const n = countOutcomes\(results\);/);
+  assert.match(report, /toast\(`Cloned \$\{n\.created\} \/ failed \$\{n\.failed\}/);
+  assert.match(report, /outcome: outcomeOf\(r\)/);
+  assert.match(report, /notes: r\.adjustments/);
+  assert.match(report, /plural\(n\.created, "policy", "policies"\)/);
+});

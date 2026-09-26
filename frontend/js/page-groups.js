@@ -3,7 +3,7 @@ import { api } from "./api.js";
 import { toast } from "./toast.js";
 import { getCachedSection, refreshSection } from "./preload-client.js";
 import { makeSortable } from "./sortable.js";
-import { rowMenu, wireRowMenus, onDestCell, ON_DEST_HEADER } from "./ui.js";
+import { rowMenu, wireRowMenus, onDestCell, ON_DEST_HEADER, plural, resultsModal, outcomeOf, countOutcomes } from "./ui.js";
 
 const state = {
   activeTab: "endpoint", // "endpoint" | "user"
@@ -208,33 +208,42 @@ function wireBasket() {
     const total = epIds.length + ugIds.length;
     if (!confirm(`Mirror ${total} group${total === 1 ? "" : "s"} to destination?\n\nNote: only name and metadata are copied. Membership is not transferred.`)) return;
 
-    const results = [];
-    try {
-      if (epIds.length > 0) {
-        const res = await api.post("/api/migrate/groups", { groupIds: epIds });
-        results.push(...(res.results || []));
+    // Each request's results, or a failed row per group when the request itself fails.
+    const mirror = async (path, body, ids, tab) => {
+      try {
+        return (await api.post(path, body)).results ?? [];
+      } catch (err) {
+        return ids.map((id) => ({ sourceId: id, sourceName: nameOf(tab, id), ok: false, action: "create", error: err.message || "Mirror failed" }));
       }
-      // Mirror user groups manually (no dedicated migrate route; create each on dest)
-      for (const id of ugIds) {
-        const ug = state.user.source.find((g) => g.id === id);
-        if (!ug) continue;
-        try {
-          await api.post("/api/dest/user-groups", { name: ug.name, description: ug.description });
-          results.push({ ok: true, sourceName: ug.name, action: "create" });
-        } catch (err) {
-          results.push({ ok: false, sourceName: ug.name, error: err.message });
-        }
-      }
-      const ok = results.filter((r) => r.ok).length;
-      const failed = results.filter((r) => !r.ok).length;
-      toast(`Mirrored ${ok} / failed ${failed}`, failed ? "err" : "ok");
-      state.selectedSource.clear();
-      await refreshSection("dest", "groups").catch(() => {});
-      await Promise.all([loadEndpointGroups("dest"), loadUserGroups("dest")]);
-      renderActive();
-    } catch (err) {
-      toast(err.message || "Mirror failed", "err");
-    }
+    };
+    const endpoint = epIds.length ? await mirror("/api/migrate/groups", { groupIds: epIds }, epIds, "endpoint") : [];
+    const user = ugIds.length ? await mirror("/api/migrate/user-groups", { userGroupIds: ugIds }, ugIds, "user") : [];
+    const n = countOutcomes([...endpoint, ...user]);
+    toast(`Mirrored ${n.created} / failed ${n.failed}`, n.failed ? "err" : "ok");
+    showResults(endpoint, user);
+    // Keep the selection when nothing got through, so it can be tried again.
+    if (n.failed < total) state.selectedSource.clear();
+    await refreshSection("dest", "groups").catch(() => {});
+    await Promise.all([loadEndpointGroups("dest"), loadUserGroups("dest")]);
+    renderActive();
+  });
+}
+
+function nameOf(tab, id) {
+  return (state[tab].source || []).find((g) => g.id === id)?.name ?? id;
+}
+
+/** The results list: each group tagged created, already there or failed. */
+function showResults(endpoint, user) {
+  const n = countOutcomes([...endpoint, ...user]);
+  const row = (tab) => (r) => ({ outcome: outcomeOf(r), text: nameOf(tab, r.sourceId), error: r.error });
+  resultsModal({
+    title: "Mirror results",
+    summary: `${plural(n.created, "group")} created on the destination. Each write is in data/audit.log.`,
+    groups: [
+      { title: "Endpoint groups", rows: endpoint.map(row("endpoint")) },
+      { title: "User groups", rows: user.map(row("user")) },
+    ],
   });
 }
 

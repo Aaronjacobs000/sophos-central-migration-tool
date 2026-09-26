@@ -1,5 +1,6 @@
 /**
- * POST /api/migrate/policies, /api/migrate/groups, /api/migrate/exclusions
+ * POST /api/migrate/policies, /api/migrate/groups, /api/migrate/user-groups,
+ * /api/migrate/exclusions
  *
  * Each accepts dryRun mode via body or `?dryRun=true` query.
  */
@@ -7,7 +8,7 @@
 import { Router } from "express";
 import { requireConfigured } from "../middleware/require-configured.js";
 import { migratePolicies } from "../services/policy-migrator.js";
-import { mirrorGroups } from "../services/group-mirror.js";
+import { mirrorGroups, mirrorUserGroups } from "../services/group-mirror.js";
 import { copyExclusions, EXCLUSION_TYPES, type ExclusionType } from "../services/exclusion-copier.js";
 
 export const migrateConfigRouter = Router();
@@ -45,6 +46,23 @@ migrateConfigRouter.post("/migrate/groups", async (req, res, next) => {
     }
     const results = await mirrorGroups({
       groupIds: ids,
+      dryRun: isDryRun(req),
+    });
+    res.json({ results });
+  } catch (err) {
+    next(err);
+  }
+});
+
+migrateConfigRouter.post("/migrate/user-groups", async (req, res, next) => {
+  try {
+    const ids = Array.isArray(req.body?.userGroupIds) ? req.body.userGroupIds : [];
+    if (!ids.length) {
+      res.status(400).json({ error: "bad_request", message: "userGroupIds[] required" });
+      return;
+    }
+    const results = await mirrorUserGroups({
+      userGroupIds: ids,
       dryRun: isDryRun(req),
     });
     res.json({ results });
