@@ -670,14 +670,13 @@ function renderMembership(res) {
         <td><span class="cell-name">${esc(r.hostname)}</span></td>
         <td>${r.sourceGroup ? esc(r.sourceGroup) : `<span class="hint">none</span>`}</td>
         <td>${dest}</td>
-        <td><span class="tag ${cls}">${esc(label)}</span></td>
-        <td><span class="hint">${esc(r.message || "")}</span></td>
+        <td><div class="status-stack"><span class="tag ${cls}">${esc(label)}</span>${r.message ? `<span class="hint">${esc(r.message)}</span>` : ""}</div></td>
       </tr>`;
   }).join("");
   document.getElementById("membership-body").innerHTML = `
     <div class="table-wrap">
       <table class="data-table">
-        <thead><tr><th>Device</th><th>Source group</th><th>Destination group</th><th>Status</th><th>Detail</th></tr></thead>
+        <thead><tr><th>Device</th><th>Source group</th><th>Destination group</th><th>Status</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>

@@ -167,7 +167,7 @@ export async function restoreGroupMembership(
     // A group picked for this device, or the one with its source group's name.
     const choice = Object.prototype.hasOwnProperty.call(choices, id) ? choices[id] : undefined;
     if (choice === null) {
-      rows.push({ ...base, status: "left-out", message: "left out: not added to a group" });
+      rows.push({ ...base, status: "left-out", message: "not added to a group" });
       continue;
     }
     let dest: (typeof destGroups)[number] | undefined;
