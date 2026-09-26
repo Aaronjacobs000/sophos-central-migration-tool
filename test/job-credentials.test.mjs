@@ -272,3 +272,29 @@ test("partner credentials: one encrypted entry for both tenants, and the job kee
   assert.deepEqual([...new Set(tenantCalls())].sort(), ["dst", "src"]);
   assert.equal(count(JSON.stringify(polled), [PARTNER.secret, PARTNER.clientId]), 0);
 });
+
+test("reading a stored credential while others are saved never gets half the file", async () => {
+  const { putCredential, getCredential } = await import("../backend/dist/services/job-credentials.js");
+  const cred = (i) => ({ clientId: `race-client-${i}`, clientSecret: `race-secret-value-${i}` });
+  const ids = [];
+  for (let i = 0; i < 30; i++) ids.push(await putCredential("tenant", cred(i)));
+  let saving = true;
+  const saves = (async () => {
+    try {
+      for (let round = 0; round < 100; round++) await putCredential("tenant", cred(round % 30));
+    } finally {
+      saving = false;
+    }
+  })();
+  const readers = [0, 1, 2, 3].map(async (k) => {
+    let n = 0;
+    while (saving) {
+      const i = (n + k) % 30;
+      assert.equal((await getCredential(ids[i]))?.clientId, cred(i).clientId, `read ${n}`);
+      n++;
+    }
+    return n;
+  });
+  const counts = await Promise.all([saves, ...readers]);
+  assert.ok(counts.slice(1).every((n) => n > 0));
+});

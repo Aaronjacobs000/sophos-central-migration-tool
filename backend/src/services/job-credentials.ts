@@ -164,7 +164,8 @@ export function putCredential(kind: CredentialKind, cred: ApiCredential): Promis
  * another computer, or the key file was deleted).
  */
 export async function getCredential(id: string): Promise<(ApiCredential & { kind: CredentialKind }) | null> {
-  const entry = (await readVault()).entries.find((e) => e.id === id);
+  // Queued behind saves, which rewrite the file: a read mid-save gets half of it.
+  const entry = await serial(async () => (await readVault()).entries.find((e) => e.id === id));
   if (!entry) return null;
   const key = await loadKey(false);
   if (!key) throw new CredentialUnreadableError("The key for the stored credentials is missing on this computer.");
