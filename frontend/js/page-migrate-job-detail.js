@@ -37,7 +37,7 @@ function connectStream(id) {
   eventSource.addEventListener("done", (e) => {
     try {
       const data = JSON.parse(e.data);
-      toast(`Migration ${data.status ?? "finished"}.`, data.status === "complete" ? "ok" : "info");
+      toast(data.status === "complete" ? "Migration complete. Every device has checked in." : `Migration ${data.status ?? "finished"}.`, data.status === "complete" ? "ok" : "info");
     } catch {}
     eventSource.close();
   });
@@ -72,7 +72,7 @@ function render(job) {
   // Warnings
   renderWarnings(job);
 
-  document.getElementById("job-status").innerHTML = statusTag(job.status);
+  document.getElementById("job-status").innerHTML = jobStatusTag(job);
   renderProgress(job);
 
   // Core metadata
@@ -291,15 +291,33 @@ function renderEndpoints(job) {
         <td><span class="cell-name">${esc(m.hostname || m.id)}</span></td>
         <td>${epState(m.source?.status)}</td>
         <td>${epState(m.dest?.status)}</td>
+        <td>${checkInCell(job.checkIns?.[m.id])}</td>
         <td>${errors.length ? `<span class="ep-error">${esc(errors.join(" · "))}</span>` : `<span class="hint">none</span>`}</td>
       </tr>`;
     })
     .join("");
   grid.innerHTML = `
     <table class="data-table">
-      <thead><tr><th>Device</th><th><span class="side-title">Source</span></th><th><span class="side-title is-dest">Destination</span></th><th>Errors</th></tr></thead>
+      <thead><tr><th>Device</th><th><span class="side-title">Source</span></th><th><span class="side-title is-dest">Destination</span></th><th>Check-in</th><th>Errors</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
+}
+
+// Arrival on the receiving tenant. The API says "succeeded" at the handover;
+// the device moves when it next checks in, under its new ID.
+function checkInCell(c) {
+  const newId = c?.newId ? `<div class="hint">new ID <code>${esc(c.newId)}</code></div>` : "";
+  if (!c) return `<span class="ep-state"><span class="conn-dot" data-state="unconfigured"></span><span class="hint">no data</span></span>`;
+  if (c.state === "checked-in") {
+    const title = "The device's last-seen time when this page first found it checked in. With the page open during the move, this is within 10 seconds of the check-in.";
+    return `<span class="ep-state" title="${esc(title)}"><span class="conn-dot" data-state="ok"></span>checked in by ${esc(new Date(c.checkedInAt).toLocaleString())}</span>${newId}`;
+  }
+  if (c.state === "waiting") {
+    const since = c.handedOverAt ? `<div class="hint">handed over ${esc(new Date(c.handedOverAt).toLocaleString())}</div>` : "";
+    return `<span class="ep-state"><span class="conn-dot" data-state="loading"></span>waiting for check-in</span>${since}${newId}`;
+  }
+  if (c.state === "move-failed") return `<span class="ep-state"><span class="conn-dot" data-state="error"></span>move failed</span>`;
+  return `<span class="ep-state"><span class="conn-dot" data-state="unconfigured"></span><span class="hint">not handed over yet</span></span>`;
 }
 
 function formatElapsed(since) {
@@ -319,6 +337,16 @@ function statusClass(status) {
   if (s === "complete" || s === "completed" || s === "succeeded") return "tag-ok";
   if (s === "failed" || s === "cancelled" || s === "error") return "tag-bad";
   return "tag-warn";
+}
+
+// "complete" from the API means handed over; until every device checks in, say so.
+function jobStatusTag(job) {
+  const s = (job.status || "").toLowerCase();
+  const waiting = Object.values(job.checkIns ?? {}).some((c) => c.state === "waiting");
+  if (waiting && (s === "complete" || s === "partially-complete")) {
+    return `<span class="tag tag-warn"><span class="conn-dot" data-state="loading"></span>waiting for check-in</span>`;
+  }
+  return statusTag(job.status);
 }
 
 function statusTag(status) {
@@ -347,19 +375,22 @@ function renderProgress(job) {
   const total = job.endpointIds.length;
   let moved = 0;
   let failed = 0;
+  let checkedIn = 0;
   for (const id of job.endpointIds) {
     const cls = epStatusClass(byId.get(id)?.status);
     if (cls === "ep-ok") moved++;
     else if (cls === "ep-fail") failed++;
+    if (job.checkIns?.[id]?.state === "checked-in") checkedIn++;
   }
   const done = moved + failed;
-  const pct = total ? Math.round((done / total) * 100) : 0;
+  // The bar fills as devices arrive, not at the handover.
+  const pct = total ? Math.round(((checkedIn + failed) / total) * 100) : 0;
   const s = (job.status || "").toLowerCase();
   const cls = s === "failed" || s === "cancelled" ? "is-bad" : pct >= 100 ? "is-ok" : "is-live";
   el.innerHTML = `
     <div class="job-bar">
       <div class="bar bar-lg" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><span class="bar-fill ${cls}" style="width:${Math.max(pct, 3)}%"></span></div>
-      <span class="tnum job-bar-text"><strong>${moved}</strong> moved${failed ? `, <strong>${failed}</strong> failed` : ""}, ${total - done} pending of ${total}</span>
+      <span class="tnum job-bar-text"><strong>${moved}</strong> handed over, <strong>${checkedIn}</strong> checked in${failed ? `, <strong>${failed}</strong> failed` : ""}, ${total - done} pending of ${total}</span>
     </div>`;
 }
 

@@ -16,6 +16,7 @@ import {
   pollJob,
 } from "../services/device-migrator.js";
 import { listJobs, getJob } from "../services/migration-store.js";
+import { awaitingCheckIn } from "../services/device-check-in.js";
 import { restoreGroupMembership, JobNotFoundError } from "../services/group-membership.js";
 import { listMigrationJobs } from "../sophos/api/migrations.js";
 import { requireContext } from "../state.js";
@@ -220,8 +221,9 @@ migrateDevicesRouter.get("/migrate/devices/jobs/:id/stream", async (req, res) =>
         return;
       }
       send("status", updated);
+      // A handed-over device is followed until it checks in on the receiving tenant.
       const terminal = ["complete", "failed", "partially-complete", "cancelled"];
-      if (terminal.includes(updated.status)) {
+      if (terminal.includes(updated.status) && !awaitingCheckIn(updated)) {
         send("done", { status: updated.status });
         cancelled = true;
         res.end();

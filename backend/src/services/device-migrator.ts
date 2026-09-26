@@ -33,6 +33,7 @@ import {
 } from "./migration-store.js";
 import { audit } from "./audit-log.js";
 import { checkMigrationWindow } from "./migration-window.js";
+import { refreshCheckIns } from "./device-check-in.js";
 import { log, registerSecret } from "../log.js";
 import type { SophosEndpoint } from "../sophos/types/sophos.js";
 
@@ -290,6 +291,15 @@ export async function pollJob(localJobId: string): Promise<LocalMigrationJob | n
     job.status,
   );
 
+  // Handover is not arrival: each device moves when it next checks in.
+  const receivingIsSource = job.direction === "dest-to-source";
+  const checkIn = await refreshCheckIns(
+    job,
+    receivingIsSource ? srcEndpoints.value : dstEndpoints.value,
+    receivingIsSource ? dstEndpoints.value : srcEndpoints.value,
+    receivingIsSource ? src : dst,
+  );
+
   const updated = await updateJob(localJobId, {
     sourceSnapshot: srcJob.value
       ? {
@@ -308,8 +318,9 @@ export async function pollJob(localJobId: string): Promise<LocalMigrationJob | n
         }
       : null,
     status,
+    checkIns: checkIn.checkIns,
     lastPolledAt: new Date().toISOString(),
-    lastError: srcJob.error ?? dstJob.error,
+    lastError: srcJob.error ?? dstJob.error ?? checkIn.error,
   });
 
   return updated;

@@ -63,7 +63,9 @@
           <li>Press <strong>Migrate</strong> to open the migration form.</li>
           <li>Run a <strong>dry run</strong> to see the plan without any upstream writes.</li>
           <li>Name the job, tick the 14-day acknowledgement and create the jobs. The tool creates a receiving job on the destination, then triggers the sending job on the source with the receiver's handshake token.</li>
-          <li>The job page follows a server-side event stream and shows each device's status as it moves.</li>
+          <li>The job page follows a server-side event stream and shows each device's status as it moves. Sophos
+            reports a device moved within seconds, but the device arrives when it next checks in to the receiving
+            tenant, under a new ID. The Check-in column says waiting for check-in until then.</li>
         </ol>
         <p>A started migration can't be cancelled: the Sophos migrations API has no cancel or delete, so the move
           runs to the end. A receiving job that the sending tenant never picks up expires 14 days after it was created.</p>

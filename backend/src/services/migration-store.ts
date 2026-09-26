@@ -22,6 +22,24 @@ export interface EndpointGroupRef {
   name: string;
 }
 
+/**
+ * Where a device is on the receiving tenant. Sophos hands a device over within
+ * seconds, but the device only moves when it next checks in, under its new ID.
+ */
+export interface DeviceCheckIn {
+  state: "not-moved" | "move-failed" | "waiting" | "checked-in";
+  /** The device's ID on the receiving tenant, from the migration job. */
+  newId?: string;
+  /** When Sophos reported the device moved (migratedAt). */
+  handedOverAt?: string;
+  /**
+   * The device's last-seen time when the tool first found it checked in. The
+   * device had checked in by then; with the job page open during the move it is
+   * within one poll of the first check-in.
+   */
+  checkedInAt?: string;
+}
+
 export interface LocalMigrationJob {
   localJobId: string;
   jobName: string;
@@ -37,6 +55,8 @@ export interface LocalMigrationJob {
    * created (null for no group). Absent on jobs created before 0.2.0.
    */
   endpointGroups?: Record<string, EndpointGroupRef | null>;
+  /** Check-in on the receiving tenant, by the device's ID on the sending tenant. */
+  checkIns?: Record<string, DeviceCheckIn>;
   status: "in-progress" | "complete" | "failed" | "partially-complete" | "cancelled";
   sourceSnapshot: SophosMigrationJob | null;
   destSnapshot: SophosMigrationJob | null;

@@ -17,6 +17,8 @@ export interface ListEndpointsOptions {
   pageFromKey?: string;
   /** Optional Sophos-side filters; passed through to query string. */
   hostnameContains?: string;
+  /** Only these endpoint IDs (sent comma separated). */
+  ids?: string[];
   ipAddresses?: string;
   type?: "computer" | "server";
   healthStatus?: string;
@@ -32,6 +34,7 @@ export async function listEndpoints(
   };
   if (opts.pageFromKey) params.pageFromKey = opts.pageFromKey;
   if (opts.hostnameContains) params.hostnameContains = opts.hostnameContains;
+  if (opts.ids?.length) params.ids = opts.ids.join(",");
   if (opts.ipAddresses) params.ipAddresses = opts.ipAddresses;
   if (opts.type) params.type = opts.type;
   if (opts.healthStatus) params.healthStatus = opts.healthStatus;
