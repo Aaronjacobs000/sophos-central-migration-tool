@@ -277,8 +277,9 @@ async function bootNav() {
     const status = await api.get("/api/status");
     renderNav(status);
     if (status?.status === "unconfigured") {
+      // Jobs are checked with their own stored credentials, so their pages work without a connection.
       const path = window.location.pathname;
-      const allowList = ["/welcome.html", "/credentials.html"];
+      const allowList = ["/welcome.html", "/credentials.html", "/migrate-jobs.html", "/migrate-job-detail.html"];
       if (!allowList.includes(path)) {
         window.location.href = "/welcome.html";
       }

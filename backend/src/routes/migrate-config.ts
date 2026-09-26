@@ -2,7 +2,9 @@
  * POST /api/migrate/policies, /api/migrate/groups, /api/migrate/user-groups,
  * /api/migrate/exclusions
  *
- * Each accepts dryRun mode via body or `?dryRun=true` query.
+ * Each accepts dryRun mode via body or `?dryRun=true` query, and each needs
+ * the tool's current connection. The guard sits on these routes, not on
+ * /migrate, so the job routes in migrate-devices.ts answer without one.
  */
 
 import { Router } from "express";
@@ -13,13 +15,11 @@ import { copyExclusions, EXCLUSION_TYPES, type ExclusionType } from "../services
 
 export const migrateConfigRouter = Router();
 
-migrateConfigRouter.use("/migrate", requireConfigured);
-
 function isDryRun(req: any): boolean {
   return req.query?.dryRun === "true" || req.body?.dryRun === true;
 }
 
-migrateConfigRouter.post("/migrate/policies", async (req, res, next) => {
+migrateConfigRouter.post("/migrate/policies", requireConfigured, async (req, res, next) => {
   try {
     const ids = Array.isArray(req.body?.policyIds) ? req.body.policyIds : [];
     if (!ids.length) {
@@ -37,7 +37,7 @@ migrateConfigRouter.post("/migrate/policies", async (req, res, next) => {
   }
 });
 
-migrateConfigRouter.post("/migrate/groups", async (req, res, next) => {
+migrateConfigRouter.post("/migrate/groups", requireConfigured, async (req, res, next) => {
   try {
     const ids = Array.isArray(req.body?.groupIds) ? req.body.groupIds : [];
     if (!ids.length) {
@@ -54,7 +54,7 @@ migrateConfigRouter.post("/migrate/groups", async (req, res, next) => {
   }
 });
 
-migrateConfigRouter.post("/migrate/user-groups", async (req, res, next) => {
+migrateConfigRouter.post("/migrate/user-groups", requireConfigured, async (req, res, next) => {
   try {
     const ids = Array.isArray(req.body?.userGroupIds) ? req.body.userGroupIds : [];
     if (!ids.length) {
@@ -71,7 +71,7 @@ migrateConfigRouter.post("/migrate/user-groups", async (req, res, next) => {
   }
 });
 
-migrateConfigRouter.post("/migrate/exclusions", async (req, res, next) => {
+migrateConfigRouter.post("/migrate/exclusions", requireConfigured, async (req, res, next) => {
   try {
     const sel = req.body?.selections ?? {};
     if (!sel || typeof sel !== "object") {

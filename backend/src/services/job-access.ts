@@ -142,7 +142,9 @@ export async function contextsForJob(job: LocalMigrationJob): Promise<JobContext
     if (source && dest && source.tenantId === job.tenants.source.tenantId && dest.tenantId === job.tenants.dest.tenantId) {
       return { source, dest, via: "current", unverified: false };
     }
-    throw new JobAccessError("no-credentials", "Credentials are not stored for this job, and the tool now points at other tenants.");
+    throw new JobAccessError("no-credentials", source && dest
+      ? "Credentials are not stored for this job, and the tool now points at other tenants."
+      : "Credentials are not stored for this job, and the tool is not connected to two tenants right now.");
   }
   if (source && dest) return { source, dest, via: "current", unverified: true };
   throw new JobAccessError("no-credentials", "Credentials are not stored for this job.");
