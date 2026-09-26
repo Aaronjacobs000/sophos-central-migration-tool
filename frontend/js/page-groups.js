@@ -3,7 +3,7 @@ import { api } from "./api.js";
 import { toast } from "./toast.js";
 import { getCachedSection, refreshSection } from "./preload-client.js";
 import { makeSortable } from "./sortable.js";
-import { rowMenu, wireRowMenus } from "./ui.js";
+import { rowMenu, wireRowMenus, onDestCell, ON_DEST_HEADER } from "./ui.js";
 
 const state = {
   activeTab: "endpoint", // "endpoint" | "user"
@@ -96,10 +96,10 @@ function renderTable(side) {
   const rows = sorted.map((g) => {
     const key = `${tab}::${g.id}`;
     const checked = side === "source" && state.selectedSource.has(key) ? "checked" : "";
-    const checkbox = side === "source"
-      ? `<td class="col-check"><input type="checkbox" data-key="${escAttr(key)}" ${checked} aria-label="Select ${escAttr(g.name)}"/></td>`
-      : "";
     const onBoth = otherNames.has(g.name.toLowerCase());
+    const checkbox = side === "source"
+      ? `<td class="col-check"><input type="checkbox" data-key="${escAttr(key)}" ${checked} aria-label="Select ${escAttr(g.name)}"/></td>${onDestCell(onBoth)}`
+      : "";
     const badge = side === "source" && !onBoth ? `<span class="tag tag-src">not on destination</span>` : "";
     const extra = tab === "user"
       ? `<td><span class="hint">${esc(g.source?.type ?? g.source ?? "")}</span></td><td class="tnum">${g.usersCount ?? g.users?.total ?? "-"}</td>`
@@ -115,7 +115,7 @@ function renderTable(side) {
     ? `<th>Source</th><th>Users</th>`
     : `<th>Type</th>`;
   const deleteHeader = side === "dest" ? `<th class="col-actions"></th>` : "";
-  const checkHeader = side === "source" ? `<th class="col-check"></th>` : "";
+  const checkHeader = side === "source" ? `<th class="col-check"></th>${ON_DEST_HEADER}` : "";
 
   target.innerHTML = `
     <table class="data-table">

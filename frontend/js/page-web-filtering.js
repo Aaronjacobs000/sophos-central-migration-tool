@@ -2,7 +2,7 @@ import "./nav.js";
 import { api } from "./api.js";
 import { toast } from "./toast.js";
 import { makeSortable } from "./sortable.js";
-import { esc, escAttr, plural, resultsModal, outcomeOf, rowMenu, wireRowMenus } from "./ui.js";
+import { esc, escAttr, plural, resultsModal, outcomeOf, rowMenu, wireRowMenus, onDestCell, ON_DEST_HEADER } from "./ui.js";
 
 const TABS = {
   "site-lists": { label: "site list", path: "site-lists", param: "siteListIds" },
@@ -68,7 +68,7 @@ function renderTable(side) {
     const key = `${tab}::${it.id}`;
     const checked = side === "source" && state.selected.has(key) ? "checked" : "";
     const onBoth = otherNames.has(nameKey(it.name));
-    const cb = side === "source" ? `<td class="col-check"><input type="checkbox" data-key="${escAttr(key)}" ${checked} aria-label="Select ${escAttr(it.name)}"/></td>` : "";
+    const cb = side === "source" ? `<td class="col-check"><input type="checkbox" data-key="${escAttr(key)}" ${checked} aria-label="Select ${escAttr(it.name)}"/></td>${onDestCell(onBoth)}` : "";
     const cls = [onBoth ? "is-dim" : "", checked ? "selected" : ""].filter(Boolean).join(" ");
     const cells = tab === "site-lists"
       ? `<td><span class="cell-name">${esc(it.name)}</span>${it.description ? `<div class="hint">${esc(it.description)}</div>` : ""}</td>
@@ -88,7 +88,7 @@ function renderTable(side) {
   const head = tab === "site-lists" ? "<th>Name</th><th>Sites</th><th>Used by</th>" : "<th>Name</th><th>Policies</th><th>Updated</th>";
   target.innerHTML = `
     <table class="data-table">
-      <thead><tr>${side === "source" ? `<th class="col-check"></th>` : ""}${head}${side === "dest" ? `<th class="col-actions"></th>` : ""}</tr></thead>
+      <thead><tr>${side === "source" ? `<th class="col-check"></th>${ON_DEST_HEADER}` : ""}${head}${side === "dest" ? `<th class="col-actions"></th>` : ""}</tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
   makeSortable(target);

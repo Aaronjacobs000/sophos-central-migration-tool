@@ -41,6 +41,18 @@ export function rowMenu(items, label = "More actions") {
   return `<span class="row-menu"><button type="button" class="icon-btn" data-menu-toggle aria-haspopup="menu" aria-expanded="false" title="${escAttr(label)}" aria-label="${escAttr(label)}">${icon("more")}</button><span class="row-menu-list hidden" role="menu">${buttons}</span></span>`;
 }
 
+/**
+ * The cell after a source row's checkbox: a tick when the row is already on
+ * the destination. The row may be dimmed, but this cell is not.
+ */
+export function onDestCell(onDest) {
+  const label = "Already on the destination";
+  return `<td class="col-tick">${onDest ? `<span class="on-dest" role="img" title="${label}" aria-label="${label}">${icon("check")}</span>` : ""}</td>`;
+}
+
+/** Header for the tick column. */
+export const ON_DEST_HEADER = `<th class="col-tick" title="Already on the destination"></th>`;
+
 let menuWired = false;
 
 /** Opens and closes row menus under root. Safe to call after every render. */

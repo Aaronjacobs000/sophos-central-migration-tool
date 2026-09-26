@@ -3,7 +3,7 @@ import { api } from "./api.js";
 import { toast } from "./toast.js";
 import { getCachedSection, refreshSection } from "./preload-client.js";
 import { makeSortable } from "./sortable.js";
-import { rowMenu, wireRowMenus, plural, resultsModal, outcomeOf } from "./ui.js";
+import { rowMenu, wireRowMenus, plural, resultsModal, outcomeOf, onDestCell, ON_DEST_HEADER } from "./ui.js";
 
 // The first three types come from the preload cache and can be deleted on
 // the destination. The rest are read on demand and are copy only.
@@ -225,13 +225,13 @@ function renderTable(side) {
     .map((it) => {
       const id = idOf(type, it);
       const checked = side === "source" && state.selectedSource.has(`${type}::${id}`) ? "checked" : "";
+      const onBoth = otherKeys.has(keyFor(type, it));
       const checkbox = side === "source"
-        ? `<td class="col-check"><input type="checkbox" data-id="${escapeAttr(id)}" ${checked} aria-label="Select item"/></td>`
+        ? `<td class="col-check"><input type="checkbox" data-id="${escapeAttr(id)}" ${checked} aria-label="Select item"/></td>${onDestCell(onBoth)}`
         : "";
       const actionCell = side === "dest" && canDelete
         ? `<td class="col-actions">${rowMenu([{ label: "Delete from destination", icon: "trash", danger: true, attrs: `data-delete-dest="${escapeAttr(it.id)}" data-display="${escapeAttr(typeof it.value === "string" ? it.value : formatItemValue(it))}"` }])}</td>`
         : "";
-      const onBoth = otherKeys.has(keyFor(type, it));
       const cls = [onBoth ? "is-dim" : "", checked ? "selected" : ""].filter(Boolean).join(" ");
       return `
         <tr${cls ? ` class="${cls}"` : ""}${onBoth ? ' title="Exists on both sides"' : ""}>
@@ -242,7 +242,7 @@ function renderTable(side) {
     })
     .join("");
   const headerExtra = side === "dest" && canDelete ? `<th class="col-actions"></th>` : "";
-  const checkHeader = side === "source" ? `<th class="col-check"></th>` : "";
+  const checkHeader = side === "source" ? `<th class="col-check"></th>${ON_DEST_HEADER}` : "";
   target.innerHTML = `
     ${note}
     <table class="data-table">

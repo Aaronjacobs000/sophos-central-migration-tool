@@ -363,9 +363,12 @@ input:disabled { cursor: not-allowed; opacity: 0.5; }
 .data-table .col-actions { width: 1%; white-space: nowrap; text-align: right; }
 .data-table a { color: var(--ink-1); font-weight: 550; }
 .data-table a:hover { color: var(--accent-text); }
-/* The actions cell stays at full strength so its menu is not faded. */
-.data-table tr.is-dim td:not(.col-actions) { opacity: 0.48; }
-.data-table tr.is-dim:hover td:not(.col-actions) { opacity: 0.85; }
+/* The tick and actions cells stay at full strength, so the tick is clear and the menu is not faded. */
+.data-table tr.is-dim td:not(.col-tick):not(.col-actions) { opacity: 0.48; }
+.data-table tr.is-dim:hover td:not(.col-tick):not(.col-actions) { opacity: 0.85; }
+.data-table .col-tick { width: 24px; padding-left: 6px; padding-right: 0; text-align: center; }
+.on-dest { display: inline-flex; color: var(--ok); }
+.on-dest .ico { width: 16px; height: 16px; stroke-width: 2.4; }
 .cell-nowrap { white-space: nowrap; }
 .cell-truncate { max-width: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 

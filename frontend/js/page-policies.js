@@ -4,7 +4,7 @@ import { toast } from "./toast.js";
 import { getCachedSection, refreshSection } from "./preload-client.js";
 import { makeSortable } from "./sortable.js";
 import { icon } from "./icons.js";
-import { rowMenu, wireRowMenus, stackBar } from "./ui.js";
+import { rowMenu, wireRowMenus, stackBar, onDestCell, ON_DEST_HEADER } from "./ui.js";
 
 // Friendly labels for known Sophos endpoint policy types. Anything not in
 // this map falls back to title-casing the raw type slug.
@@ -319,6 +319,7 @@ function renderProductSection(type, srcList, dstList) {
     return `
       <tr${checked ? ' class="selected"' : ""}>
         <td class="col-check"><input type="checkbox" data-id="${escapeAttr(p.id)}" ${checked} aria-label="Select ${escapeAttr(p.name)}"/></td>
+        ${onDestCell(inDest)}
         <td class="cell-name">
           <a href="/policy-detail.html?side=source&id=${encodeURIComponent(p.id)}">${escapeHtml(p.name)}</a>
           ${statusBadge}
@@ -351,7 +352,7 @@ function renderProductSection(type, srcList, dstList) {
       ? `<div class="empty-state">No source policies${q ? " match the filter" : ""}.</div>`
       : `<table class="data-table">
            <thead>
-             <tr><th class="col-check"></th><th>Name</th><th>State</th><th class="col-actions"></th></tr>
+             <tr><th class="col-check"></th>${ON_DEST_HEADER}<th>Name</th><th>State</th><th class="col-actions"></th></tr>
            </thead>
            <tbody>${srcFiltered.map(renderSrcRow).join("")}</tbody>
          </table>`;
