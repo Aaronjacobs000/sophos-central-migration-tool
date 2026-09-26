@@ -261,12 +261,17 @@ export async function startMigration(
       if (!isUnclearWrite(err)) throw err;
       // Sophos gave no clear answer. The sending tenant knows the job only
       // once the trigger has gone through, so read the job back there.
+      // Only a job the sending tenant reports as sending counts.
       const found = await readBack(async () => {
-        const job = await getMigrationJob(from.client, from.tenantId, receiver.id);
-        return /receiv/i.test(String(job.mode ?? job.type ?? "")) ? undefined : job;
+        // A 404 is a read that worked: the sending tenant does not know the job.
+        const job = await getMigrationJob(from.client, from.tenantId, receiver.id).catch((e: unknown) => {
+          if (isNotFound(e instanceof Error ? e.message : String(e))) return null;
+          throw e;
+        });
+        return job && /^send/i.test(String(job.mode ?? job.type ?? "")) ? job : undefined;
       });
-      if (!found) throw new Error(`${notFound(err).message} ${JOBS_PAGE_NOTE}`, { cause: err });
-      sender = found;
+      if (!found.value) throw new Error(`${notFound(err, found.unread).message} ${JOBS_PAGE_NOTE}`, { cause: err });
+      sender = found.value;
       senderNote = foundNote(err, "the move on the sending tenant");
       log.emit("warn", "migration", `Sender trigger: ${senderNote}.`, { side: from.label as "source" | "dest" });
     }

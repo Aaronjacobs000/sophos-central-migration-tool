@@ -118,10 +118,10 @@ test("the pages send JSON bodies, so the guards let them through", async () => {
 
   // The job page states dryRun as a boolean every time.
   const detail = await readFile(new URL("../frontend/js/page-migrate-job-detail.js", import.meta.url), "utf8");
-  assert.match(detail, /\/group-membership`, \{ dryRun, choices: state\.memberChoices \}\)/);
+  assert.match(detail, /\/group-membership`, \{ dryRun, choices \}\)/);
   const args = [...detail.matchAll(/loadMembership\(([^)]*)\)/g)].map((m) => m[1]);
   assert.ok(args.length >= 3);
-  for (const a of args) assert.ok(["true", "false", "dryRun"].includes(a), `loadMembership(${a})`);
+  for (const a of args) assert.ok(["true", "false", "true, { quiet: true }", "dryRun, { quiet = false } = {}"].includes(a), `loadMembership(${a})`);
 });
 
 test("group membership refuses a form, plain text or bodiless post, and adds nothing", async () => {

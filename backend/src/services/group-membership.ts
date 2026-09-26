@@ -167,7 +167,7 @@ export async function restoreGroupMembership(
     // A group picked for this device, or the one with its source group's name.
     const choice = Object.prototype.hasOwnProperty.call(choices, id) ? choices[id] : undefined;
     if (choice === null) {
-      rows.push({ ...base, status: "left-out", message: "not added to a group" });
+      rows.push({ ...base, status: "left-out", message: "left as it is: the tool does not add it to a group" });
       continue;
     }
     let dest: (typeof destGroups)[number] | undefined;
@@ -222,6 +222,7 @@ export async function restoreGroupMembership(
         try {
           let res: AddToGroupResponse;
           let note: string | undefined;
+          let unclear: string | undefined;
           try {
             res = await addEndpointsToGroup(to.client, to.tenantId, g.destGroupId, batch);
           } catch (err) {
@@ -231,14 +232,14 @@ export async function restoreGroupMembership(
               const members = new Set(await listGroupEndpointIds(to.client, to.tenantId, g.destGroupId));
               return batch.filter((id) => members.has(id));
             };
-            let found = await readBack(async () => {
+            const back = await readBack(async () => {
               const got = await inGroup();
               return got.length === batch.length ? got : undefined;
             });
-            if (!found) found = await inGroup().catch(() => []);
-            if (!found.length) throw notFound(err);
+            const found = back.value ?? (back.unread ? [] : await inGroup().catch(() => []));
+            if (!found.length) throw notFound(err, back.unread);
             note = foundNote(err, found.length === 1 ? "the device in the group" : "the devices in the group");
-            const unclear = notFound(err).message;
+            unclear = notFound(err).message;
             for (const id of batch) if (!found.includes(id)) problems.set(id, unclear);
             for (const id of found) readBackNotes.set(id, note);
             res = { addedEndpoints: found.map((id) => ({ id })) };
@@ -256,7 +257,7 @@ export async function restoreGroupMembership(
             resourceId: g.destGroupId,
             ok: problems.size === 0,
             detail: { localJobId, group: g.name, ids: batch, added: [...addedIds], errors: res.errors ?? null, ...(note ? { note } : {}) },
-            ...(problems.size ? { error: `${problems.size} device(s) not added` } : {}),
+            ...(problems.size ? { error: unclear ?? `${problems.size} device(s) not added` } : {}),
           });
         } catch (err) {
           failure = err instanceof Error ? err.message : String(err);

@@ -85,8 +85,9 @@ export const AUDIT_WARNING_HEADER = "X-Audit-Warning";
 
 /**
  * Audits a write Sophos has already answered. If the entry still can't be
- * written after the lock retries, the write's own result stands: the entry
- * goes to the tool's log, and the request's response carries a warning.
+ * written (after the lock retries, or its one try while the file stays
+ * locked), the write's own result stands: the entry goes to the tool's log,
+ * and the request's response carries a warning.
  */
 export async function auditOrWarn(entry: Omit<AuditEntry, "id" | "ts">): Promise<void> {
   try {
@@ -97,7 +98,7 @@ export async function auditOrWarn(entry: Omit<AuditEntry, "id" | "ts">): Promise
     log.emit(
       "error",
       SECTION,
-      `Couldn't write an audit entry to data/audit.log (${code}): ${what} on the ${entry.side} tenant, ${entry.ok ? "done" : "refused"}. The change itself is unaffected; the entry is in this line's detail.`,
+      `Couldn't write an audit entry to data/audit.log (${code}): ${what} on the ${entry.side} tenant, ${entry.ok ? "done" : "not done or unclear"}. The change itself is unaffected; the entry is in this line's detail.`,
       { side: entry.side, detail: { entry, error: err instanceof Error ? err.message : String(err) } },
     );
     const pending = unwritten.getStore();

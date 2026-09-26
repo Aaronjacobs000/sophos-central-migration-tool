@@ -45,7 +45,7 @@ export class UnclearWriteError extends Error {
 }
 
 /** Network errors raised before a connection opens, when no request reached Sophos. */
-const NOT_SENT = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "ENETUNREACH", "EHOSTUNREACH"]);
+const NOT_SENT = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "ENETUNREACH", "EHOSTUNREACH", "UND_ERR_CONNECT_TIMEOUT"]);
 
 /** The system error code behind a failed fetch, if there is one. */
 function networkCode(error: unknown): string | undefined {
@@ -189,71 +189,75 @@ export class SophosClient {
         await this.sleep(backoff);
       };
 
-      let response: globalThis.Response;
+      // The timeout covers the answer's body too, so a write whose body stalls ends as unclear, not hung.
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 30_000);
       try {
-        response = await fetch(url, {
-          ...options,
-          signal: controller.signal,
-        });
-      } catch (error) {
-        const code = networkCode(error);
-        const reason = controller.signal.aborted
-          ? "Sophos API request got no answer within 30 s"
-          : `Sophos API request failed: ${error instanceof Error ? error.message : String(error)}${code ? ` (${code})` : ""}`;
-        // A connection that never opened sent nothing, so a write is known not to have happened.
-        if (!isRead) throw code && NOT_SENT.has(code) ? new Error(reason) : new UnclearWriteError(reason, method);
-        await retryRead(new Error(reason));
-        continue;
+        let response: globalThis.Response;
+        try {
+          response = await fetch(url, {
+            ...options,
+            signal: controller.signal,
+          });
+        } catch (error) {
+          const code = networkCode(error);
+          const reason = controller.signal.aborted
+            ? "Sophos API request got no answer within 30 s"
+            : `Sophos API request failed: ${error instanceof Error ? error.message : String(error)}${code ? ` (${code})` : ""}`;
+          // A connection that never opened sent nothing, so a write is known not to have happened.
+          if (!isRead) throw code && NOT_SENT.has(code) ? new Error(reason) : new UnclearWriteError(reason, method);
+          await retryRead(new Error(reason));
+          continue;
+        }
+
+        if (response.status === 429) {
+          const retryAfter = response.headers.get("Retry-After");
+          const waitMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : 5000;
+          if (!canRetry) {
+            const body = await response.text().catch(() => "");
+            throw new Error(`Sophos API error 429: rate limited after ${attempts} attempts${body.trim() ? `: ${body.slice(0, 300)}` : ""}`);
+          }
+          console.error(
+            `[sophos-client] Rate limited, waiting ${waitMs}ms (attempt ${attempt + 1})`,
+          );
+          await this.sleep(waitMs);
+          continue;
+        }
+
+        if (!response.ok) {
+          const errorBody = await response.text().catch(() => "");
+          let parsed: SophosApiError | null = null;
+          try {
+            parsed = JSON.parse(errorBody) as SophosApiError;
+          } catch {
+            // Not JSON
+          }
+
+          const msg = parsed
+            ? `Sophos API error ${response.status}: ${parsed.error ?? "UnknownError"}${parsed.message ? ` - ${parsed.message}` : ""}${parsed.correlationId ? ` (correlationId: ${parsed.correlationId})` : ""}`
+            : `Sophos API error (${response.status}): ${errorBody.slice(0, 500)}`;
+
+          if (response.status < 500) throw new Error(msg);
+          if (!isRead) throw new UnclearWriteError(msg, method, response.status);
+          await retryRead(new Error(msg));
+          continue;
+        }
+
+        if (response.status === 204) {
+          return {} as T;
+        }
+
+        try {
+          const text = await response.text();
+          // A write can succeed with an empty body; that is not a failure.
+          return (text.trim() ? JSON.parse(text) : {}) as T;
+        } catch (error) {
+          const reason = `Sophos API answered ${response.status} with a body that could not be read: ${error instanceof Error ? error.message : String(error)}`;
+          if (!isRead) throw new UnclearWriteError(reason, method, response.status);
+          await retryRead(new Error(reason));
+        }
       } finally {
         clearTimeout(timeout);
-      }
-
-      if (response.status === 429) {
-        const retryAfter = response.headers.get("Retry-After");
-        const waitMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : 5000;
-        if (!canRetry) {
-          throw new Error(`Sophos API error 429: TooManyRequests - rate limited after ${attempts} attempts`);
-        }
-        console.error(
-          `[sophos-client] Rate limited, waiting ${waitMs}ms (attempt ${attempt + 1})`,
-        );
-        await this.sleep(waitMs);
-        continue;
-      }
-
-      if (!response.ok) {
-        const errorBody = await response.text().catch(() => "");
-        let parsed: SophosApiError | null = null;
-        try {
-          parsed = JSON.parse(errorBody) as SophosApiError;
-        } catch {
-          // Not JSON
-        }
-
-        const msg = parsed
-          ? `Sophos API error ${response.status}: ${parsed.error ?? "UnknownError"}${parsed.message ? ` - ${parsed.message}` : ""}${parsed.correlationId ? ` (correlationId: ${parsed.correlationId})` : ""}`
-          : `Sophos API error (${response.status}): ${errorBody.slice(0, 500)}`;
-
-        if (response.status < 500) throw new Error(msg);
-        if (!isRead) throw new UnclearWriteError(msg, method, response.status);
-        await retryRead(new Error(msg));
-        continue;
-      }
-
-      if (response.status === 204) {
-        return {} as T;
-      }
-
-      try {
-        const text = await response.text();
-        // A write can succeed with an empty body; that is not a failure.
-        return (text.trim() ? JSON.parse(text) : {}) as T;
-      } catch (error) {
-        const reason = `Sophos API answered ${response.status} with a body that could not be read: ${error instanceof Error ? error.message : String(error)}`;
-        if (!isRead) throw new UnclearWriteError(reason, method, response.status);
-        await retryRead(new Error(reason));
       }
     }
 

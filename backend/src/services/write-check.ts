@@ -25,21 +25,33 @@ export function isUnclearWrite(err: unknown): err is UnclearWriteError {
   return err instanceof UnclearWriteError;
 }
 
+/** What a read-back found, or, when no read worked, why. */
+export interface ReadBack<T> {
+  value?: T;
+  /** Set when every read failed, so nothing was read at all. */
+  unread?: string;
+}
+
 /**
  * Reads back until find() returns something, waiting before each read. A
- * read that fails counts as a miss. Undefined when every read missed.
+ * read that fails counts as a miss, and when every read fails the result
+ * says why, so "not found" is never claimed for a destination nobody read.
  */
-export async function readBack<T>(find: () => Promise<T | null | undefined>): Promise<T | undefined> {
+export async function readBack<T>(find: () => Promise<T | null | undefined>): Promise<ReadBack<T>> {
+  let read = false;
+  let lastError: unknown;
   for (const ms of delaysMs) {
     await new Promise((r) => setTimeout(r, ms));
     try {
       const found = await find();
-      if (found !== null && found !== undefined) return found;
-    } catch {
+      read = true;
+      if (found !== null && found !== undefined) return { value: found };
+    } catch (err) {
       // A failed read is a miss; the next one may work.
+      lastError = err;
     }
   }
-  return undefined;
+  return read ? {} : { unread: lastError instanceof Error ? lastError.message : String(lastError) };
 }
 
 /** How Sophos answered, for a note: "answered 500" or "gave no answer". */
@@ -52,9 +64,22 @@ export function foundNote(err: UnclearWriteError, what = "it"): string {
   return `${answered(err)}, but a read-back found ${what} on the destination, so the change was made`;
 }
 
-/** The error for an unclear write a read-back did not find: still unclear, and it says so. */
-export function notFound(err: UnclearWriteError): UnclearWriteError {
-  return new UnclearWriteError(`${err.reason.replace(/\.$/, "")}. A read-back did not find it yet`, err.method, err.status);
+/**
+ * The error for an unclear write a read-back did not find, or could not
+ * read (unread): still unclear, and it says which.
+ */
+export function notFound(err: UnclearWriteError, unread?: string): UnclearWriteError {
+  const readBackSaid = unread ? `A read-back could not read the destination (${unread.replace(/\.$/, "")})` : "A read-back did not find it yet";
+  return new UnclearWriteError(`${err.reason.replace(/\.$/, "")}. ${readBackSaid}`, err.method, err.status);
+}
+
+/**
+ * Why an item was not sent: an earlier create in the same run, for an item
+ * with the same name (or value), got no clear answer, so this one could make
+ * a duplicate.
+ */
+export function earlierUnclear(same = "name"): string {
+  return `not sent: an earlier create in this run with the same ${same} got no clear answer from Sophos, so this one could make a duplicate; check the destination, then try again`;
 }
 
 /**
@@ -72,7 +97,7 @@ export async function createChecked<T>(
   } catch (err) {
     if (!isUnclearWrite(err)) throw err;
     const found = await readBack(find);
-    if (found !== undefined) return { value: found, note: foundNote(err, what) };
-    throw notFound(err);
+    if (found.value !== undefined) return { value: found.value, note: foundNote(err, what) };
+    throw notFound(err, found.unread);
   }
 }

@@ -11,7 +11,7 @@ import { getGroup, listGroups, createGroup } from "../sophos/api/groups.js";
 import { listUserGroups, createUserGroup } from "../sophos/api/user-groups.js";
 import { requireContext } from "../state.js";
 import { auditOrWarn } from "./audit-log.js";
-import { createChecked } from "./write-check.js";
+import { createChecked, earlierUnclear, isUnclearWrite } from "./write-check.js";
 import type { SophosEndpointGroup } from "../sophos/types/migration.js";
 
 export interface MirrorGroupsRequest {
@@ -36,6 +36,8 @@ export async function mirrorGroups(req: MirrorGroupsRequest): Promise<MirrorGrou
 
   const destExisting = await listGroups(dst.client, dst.tenantId);
   const destNames = new Set(destExisting.map((g) => g.name.toLowerCase()));
+  // Names whose create got no clear answer: a second one could be a duplicate.
+  const unclearNames = new Set<string>();
   const results: MirrorGroupResult[] = [];
 
   for (const sourceId of req.groupIds) {
@@ -60,6 +62,10 @@ export async function mirrorGroups(req: MirrorGroupsRequest): Promise<MirrorGrou
         ok: true,
         action: "skip-exists",
       });
+      continue;
+    }
+    if (unclearNames.has(sourceGroup.name.toLowerCase())) {
+      results.push({ sourceId, sourceName: sourceGroup.name, ok: false, action: "create", error: earlierUnclear() });
       continue;
     }
 
@@ -110,6 +116,7 @@ export async function mirrorGroups(req: MirrorGroupsRequest): Promise<MirrorGrou
       });
     } catch (err) {
       const msg = errMsg(err);
+      if (isUnclearWrite(err)) unclearNames.add(sourceGroup.name.toLowerCase());
       await auditOrWarn({
         side: "dest",
         tenantId: dst.tenantId,
@@ -151,6 +158,7 @@ export async function mirrorUserGroups(req: MirrorUserGroupsRequest): Promise<Mi
   ]);
   const sourceById = new Map(sourceGroups.map((g) => [g.id, g]));
   const destNames = new Set(destExisting.map((g) => g.name.toLowerCase()));
+  const unclearNames = new Set<string>();
   const results: MirrorGroupResult[] = [];
 
   for (const sourceId of req.userGroupIds) {
@@ -161,6 +169,10 @@ export async function mirrorUserGroups(req: MirrorUserGroupsRequest): Promise<Mi
     }
     if (destNames.has(group.name.toLowerCase())) {
       results.push({ sourceId, sourceName: group.name, ok: true, action: "skip-exists" });
+      continue;
+    }
+    if (unclearNames.has(group.name.toLowerCase())) {
+      results.push({ sourceId, sourceName: group.name, ok: false, action: "create", error: earlierUnclear() });
       continue;
     }
     if (req.dryRun) {
@@ -189,6 +201,7 @@ export async function mirrorUserGroups(req: MirrorUserGroupsRequest): Promise<Mi
       results.push({ sourceId, sourceName: group.name, destId: created.id, ok: true, action: "create", ...(note ? { notes: [note] } : {}) });
     } catch (err) {
       const msg = errMsg(err);
+      if (isUnclearWrite(err)) unclearNames.add(group.name.toLowerCase());
       await auditOrWarn({
         side: "dest",
         tenantId: dst.tenantId,

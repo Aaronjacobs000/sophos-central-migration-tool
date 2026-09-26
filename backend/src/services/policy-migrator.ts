@@ -36,7 +36,7 @@ import { listProfiles } from "../sophos/api/web-filters.js";
 import { listRuntimeDetectionProfiles } from "../sophos/api/runtime-detection.js";
 import { requireContext } from "../state.js";
 import { auditOrWarn } from "./audit-log.js";
-import { createChecked, isUnclearWrite } from "./write-check.js";
+import { createChecked, earlierUnclear, isUnclearWrite } from "./write-check.js";
 import { pairPolicy } from "../compare/policy-pairing.js";
 import type { SophosPolicy } from "../sophos/types/migration.js";
 
@@ -78,6 +78,8 @@ export async function migratePolicies(
     listPolicies(dst.client, dst.tenantId),
   ]);
   const destIds = new Set(destExisting.map((p) => p.id));
+  // Type and name of each clone that got no clear answer: a second one could be a duplicate.
+  const unclearClones = new Set<string>();
 
   // Website tags available in the destination (from its local-site list),
   // fetched at most once per run. Web-control policies reference these tags by
@@ -243,6 +245,11 @@ export async function migratePolicies(
       continue;
     }
 
+    if (!match && unclearClones.has(`${sourcePolicy.type}:${sourcePolicy.name}`)) {
+      results[i] = { sourceId, sourceName: sourcePolicy.name, ok: false, action: req.dryRun ? "dry-run-create" : "create", error: earlierUnclear() };
+      continue;
+    }
+
     if (req.dryRun) {
       results[i] = {
         sourceId,
@@ -279,6 +286,8 @@ export async function migratePolicies(
               "the policy",
             ));
           }
+          // A later read-back in this run must not take this clone for its own.
+          if (!match && result.id) destIds.add(result.id);
           break;
         } catch (err) {
           const msg = errMsg(err);
@@ -322,6 +331,7 @@ export async function migratePolicies(
       };
     } catch (err) {
       const msg = errMsg(err);
+      if (!match && isUnclearWrite(err)) unclearClones.add(`${sourcePolicy.type}:${sourcePolicy.name}`);
       await auditOrWarn({
         side: "dest",
         tenantId: dst.tenantId,

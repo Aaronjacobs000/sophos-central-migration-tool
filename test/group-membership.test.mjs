@@ -123,6 +123,8 @@ test("dry run: plans additions by name, skips members and reports gaps, writes n
 
 test("picked groups: a device goes to the group picked for it, one in no group can be placed, and null leaves one out", async () => {
   seedMoved();
+  // new-2 is not in FINANCE yet, so without the null pick it would be added there.
+  destMembers = {};
   destGroups.push({ id: "dg-child", name: "Child", type: "computer" }, { id: "dg-srv", name: "Servers", type: "server" });
   await writeJobs([baseJob()]);
   // uuid(1) was in Finance and goes to Child; uuid(4) was in no group; uuid(2) is left out; uuid(3) keeps the default.
@@ -149,6 +151,8 @@ test("picked groups: a device goes to the group picked for it, one in no group c
   assert.equal(posts[0].path, "/endpoint/v1/endpoint-groups/dg-child/endpoints");
   assert.deepEqual(posts[0].body, { ids: ["new-1", "new-4"] });
   assert.ok(!JSON.stringify(fake.calls).includes("new-2"), "the device left out gets no request");
+  const noPicks = await restoreGroupMembership("local-1", { dryRun: true });
+  assert.equal(by(noPicks, 2).status, "will-add", "without the null pick it would have been added");
   assert.equal(by(real, 1).status, "added");
   assert.equal(by(real, 4).status, "added");
   const entries = (await readAudit(root)).slice(before);
@@ -195,7 +199,11 @@ test("the route passes the picks through and refuses a malformed one", async () 
 test("the job page picks a group per row and sends the picks with each preview and write", async () => {
   const js = await readFile(new URL("../frontend/js/page-migrate-job-detail.js", import.meta.url), "utf8");
   const html = await readFile(new URL("../frontend/migrate-job-detail.html", import.meta.url), "utf8");
-  assert.match(js, /\/group-membership`, \{ dryRun, choices: state\.memberChoices \}\)/);
+  assert.match(js, /\/group-membership`, \{ dryRun, choices \}\)/);
+  assert.match(js, /const choices = dryRun \? state\.memberChoices : shownChoices\(\);/);
+  // Only the latest answer is drawn, and Add to groups is off until it is.
+  assert.match(js, /if \(seq !== membershipSeq\) return res;/);
+  assert.match(js, /document\.getElementById\("membership-apply"\)\.disabled = true;/);
   assert.match(js, /document\.addEventListener\("change", onMemberPick\)/);
   assert.match(js, /<th>Destination group<\/th>/);
   // No same-name match: "Pick a group", marked, and the device is not added until one is picked.
@@ -324,4 +332,46 @@ test("a job moving devices back to the source adds them on the source tenant", a
 test("an unknown job id is a not-found error", async () => {
   await writeJobs([]);
   await assert.rejects(() => restoreGroupMembership("nope"), /not found/);
+});
+
+test("an addition only partly found by the read-back says the rest may have gone through, in the audit too", async () => {
+  const { setReadBackDelays } = await import("../backend/dist/services/write-check.js");
+  setReadBackDelays([0, 0, 0]);
+  seedMoved();
+  destMembers = {};
+  destGroups.push({ id: "dg-child", name: "Child", type: "computer" });
+  addBehaviour = (groupId, ids) => {
+    destMembers[groupId] = [...(destMembers[groupId] ?? []), ids[0]];
+    return { status: 500, body: { error: "InternalError" } };
+  };
+  await writeJobs([baseJob()]);
+  fake.reset();
+  const before = (await readAudit(root)).length;
+  const res = await restoreGroupMembership("local-1", { dryRun: false, choices: { [uuid(1)]: "dg-child", [uuid(4)]: "dg-child", [uuid(2)]: null } });
+  const by = (n) => res.rows.find((r) => r.endpointId === uuid(n));
+  assert.equal(by(1).status, "added");
+  assert.equal(by(4).status, "error");
+  assert.match(by(4).message, /A read-back did not find it yet\. The change may still have gone through/);
+  const [entry] = (await readAudit(root)).slice(before);
+  assert.equal(entry.ok, false);
+  assert.match(entry.error, /The change may still have gone through/);
+  assert.equal(fake.writes().length, 1);
+});
+
+test("Add to groups sends the group each row shows, and null for a row shown with no group", async () => {
+  const js = await readFile(new URL("../frontend/js/page-migrate-job-detail.js", import.meta.url), "utf8");
+  const src = js.slice(js.indexOf("function shownChoices"), js.indexOf("async function applyMembership"));
+  const PICKABLE = new Set(["will-add", "already-member", "no-group", "group-missing", "left-out"]);
+  const state = {
+    memberChoices: { e3: "g9" },
+    membershipShown: { rows: [
+      { endpointId: "e1", newId: "n1", status: "will-add", destGroupId: "g1" },
+      { endpointId: "e2", newId: "n2", status: "group-missing", destGroupId: null },
+      { endpointId: "e3", newId: "n3", status: "will-add", destGroupId: "g9" },
+      { endpointId: "e4", newId: "n4", status: "already-member", destGroupId: "g1" },
+      { endpointId: "e5", newId: null, status: "not-moved", destGroupId: null },
+    ] },
+  };
+  const shownChoices = new Function("state", "PICKABLE", `${src}; return shownChoices;`)(state, PICKABLE);
+  assert.deepEqual(shownChoices(), { e3: "g9", e1: "g1", e2: null, e4: "g1" });
 });

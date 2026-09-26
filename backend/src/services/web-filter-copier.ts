@@ -14,7 +14,7 @@
 
 import { requireContext } from "../state.js";
 import { auditOrWarn } from "./audit-log.js";
-import { createChecked } from "./write-check.js";
+import { createChecked, earlierUnclear, isUnclearWrite } from "./write-check.js";
 import {
   listSiteLists,
   listSites,
@@ -71,6 +71,9 @@ export async function copyWebFilters(req: CopyWebFiltersRequest): Promise<WebFil
     if (match) listMap.set(l.id, match.id);
   }
 
+  // Names whose create got no clear answer: a second one could be a duplicate.
+  const unclearNames = new Set<string>();
+
   // ---- site lists ----
   for (const id of siteListIds) {
     const list = srcListById.get(id);
@@ -81,6 +84,10 @@ export async function copyWebFilters(req: CopyWebFiltersRequest): Promise<WebFil
     const existing = dstListByName.get(nameKey(list.name));
     if (existing) {
       results.push({ kind: "site-list", sourceId: id, sourceName: list.name, destId: existing.id, ok: true, action: "skip-exists" });
+      continue;
+    }
+    if (unclearNames.has(`list:${nameKey(list.name)}`)) {
+      results.push({ kind: "site-list", sourceId: id, sourceName: list.name, ok: false, action: "create", error: earlierUnclear() });
       continue;
     }
     let sites: string[];
@@ -121,6 +128,7 @@ export async function copyWebFilters(req: CopyWebFiltersRequest): Promise<WebFil
       results.push({ kind: "site-list", sourceId: id, sourceName: list.name, destId: created.id, ok: true, action: "create", note: `${sites.length} site${sites.length === 1 ? "" : "s"}`, ...(checked ? { notes: [checked] } : {}) });
     } catch (err) {
       const msg = errMsg(err);
+      if (isUnclearWrite(err)) unclearNames.add(`list:${nameKey(list.name)}`);
       await auditOrWarn({
         side: "dest",
         tenantId: dst.tenantId,
@@ -155,6 +163,10 @@ export async function copyWebFilters(req: CopyWebFiltersRequest): Promise<WebFil
       results.push({ kind: "profile", sourceId: id, sourceName: summary.name, destId: existing.id, ok: true, action: "skip-exists" });
       continue;
     }
+    if (unclearNames.has(`profile:${nameKey(summary.name)}`)) {
+      results.push({ kind: "profile", sourceId: id, sourceName: summary.name, ok: false, action: "create", error: earlierUnclear() });
+      continue;
+    }
     let profile: SophosWebProfile;
     try {
       profile = await getProfile(src.client, src.tenantId, id);
@@ -187,6 +199,7 @@ export async function copyWebFilters(req: CopyWebFiltersRequest): Promise<WebFil
       results.push({ kind: "profile", sourceId: id, sourceName: profile.name, destId: created.id, ok: true, action: "create", ...(adjustments.length ? { adjustments } : {}), ...(checked ? { notes: [checked] } : {}) });
     } catch (err) {
       const msg = errMsg(err);
+      if (isUnclearWrite(err)) unclearNames.add(`profile:${nameKey(profile.name)}`);
       await auditOrWarn({
         side: "dest",
         tenantId: dst.tenantId,

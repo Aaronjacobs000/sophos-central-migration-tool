@@ -87,6 +87,14 @@ test("a write whose connection never opened is a plain failure: nothing reached 
   assert.equal(calls("/t/refused").length, 1);
 });
 
+test("a write whose connection times out before it opens is a plain failure", async () => {
+  fake.on(DST, "POST", "/t/connect-timeout", () => { throw Object.assign(new TypeError("fetch failed"), { cause: { code: "UND_ERR_CONNECT_TIMEOUT" } }); });
+  fake.reset();
+  const err = await client.tenantRequest(DST.tenantId, "/t/connect-timeout", { method: "POST", body: {} }).catch((e) => e);
+  assert.ok(!(err instanceof UnclearWriteError));
+  assert.equal(calls("/t/connect-timeout").length, 1);
+});
+
 test("a write Sophos refuses with 400 is sent once and is a clear failure", async () => {
   fake.on(DST, "POST", "/t/bad", () => ({ status: 400, body: { error: "BadRequest", message: "nope" } }));
   fake.reset();
@@ -109,7 +117,7 @@ test("a write turned away with 429 waits and is sent again, because Sophos did n
 test("a request still turned away with 429 after three tries fails with the rate limit", async () => {
   fake.on(DST, "POST", "/t/busy2", () => new Response("{}", { status: 429, headers: { "Retry-After": "0" } }));
   fake.reset();
-  await assert.rejects(() => client.tenantRequest(DST.tenantId, "/t/busy2", { method: "POST", body: {} }), /Sophos API error 429/);
+  await assert.rejects(() => client.tenantRequest(DST.tenantId, "/t/busy2", { method: "POST", body: {} }), /^Error: Sophos API error 429: rate limited after 3 attempts: \{\}$/);
   assert.equal(calls("/t/busy2").length, 3);
 });
 
@@ -169,6 +177,35 @@ test("group mirror: a create answered 500 that a read-back does not find fails, 
   const [entry] = await lastAudit();
   assert.equal(entry.ok, false);
   assert.match(entry.error, ADVICE);
+});
+
+test("group mirror: after an unclear create no read-back found, a second group of that name is not sent", async () => {
+  groups.dst = [];
+  groupCreateMakesIt = false;
+  fake.reset();
+  // Both source IDs read back as "Finance".
+  const res = await mirrorGroups({ groupIds: ["sg-1", "sg-2"] });
+  assert.equal(res[0].ok, false);
+  assert.match(res[0].error, /A read-back did not find it yet/);
+  assert.equal(res[1].ok, false);
+  assert.match(res[1].error, /^not sent: an earlier create in this run with the same name got no clear answer from Sophos/);
+  assert.equal(fake.writes().length, 1, "the second is never sent");
+});
+
+test("a read-back that can't read the destination says so, not that the item is missing", async () => {
+  groups.dst = [];
+  groupCreateMakesIt = false;
+  let lists = 0;
+  fake.on(DST, "GET", "/endpoint/v1/endpoint-groups", (req) => (++lists === 1 ? page(groups.dst, req.query) : { status: 403, body: { error: "Forbidden", message: "no read" } }));
+  try {
+    fake.reset();
+    const [r] = await mirrorGroups({ groupIds: ["sg-1"] });
+    assert.equal(r.ok, false);
+    assert.match(r.error, /A read-back could not read the destination \(Sophos API error 403: Forbidden - no read\)\. The change may still have gone through/);
+    assert.doesNotMatch(r.error, /did not find/);
+  } finally {
+    fake.on(DST, "GET", "/endpoint/v1/endpoint-groups", (req) => page(groups.dst, req.query));
+  }
 });
 
 test("user group mirror: a create answered 502 that a read-back finds is created", async () => {
@@ -287,6 +324,41 @@ test("policy clone: a 500 naming a setting is not sent again without it, and say
   assert.equal(fake.writes().length, 1);
 });
 
+test("policy clone: the same policy twice, the second answered 500, is not taken for the first clone", async () => {
+  pol.src = [policy("sp-1", "Laptops")];
+  pol.dst = [];
+  let n = 0;
+  fake.on(DST, "POST", "/endpoint/v1/policies", (req) => {
+    if (++n === 1) {
+      pol.dst.push({ id: "dpol-first", ...req.body });
+      return { status: 201, body: { id: "dpol-first", ...req.body } };
+    }
+    return { status: 500, body: { error: "InternalError" } };
+  });
+  try {
+    fake.reset();
+    const res = await migratePolicies({ policyIds: ["sp-1", "sp-1"] });
+    assert.equal(res[0].ok, true);
+    assert.equal(res[0].destId, "dpol-first");
+    assert.equal(res[1].ok, false, "before the fix the read-back found the first clone and called this one created");
+    assert.match(res[1].error, /A read-back did not find it yet/);
+
+    // A third of the same name after that unclear one is not sent.
+    fake.reset();
+    n = 1;
+    pol.dst = [];
+    const again = await migratePolicies({ policyIds: ["sp-1", "sp-1"] });
+    assert.equal(again[0].ok, false);
+    assert.match(again[1].error, /^not sent: an earlier create in this run with the same name/);
+    assert.equal(fake.writes().length, 1);
+  } finally {
+    fake.on(DST, "POST", "/endpoint/v1/policies", (req) => {
+      if (policyCreateMakesIt) pol.dst.push({ id: "dpol-new", ...req.body });
+      return { status: 500, body: { error: "InternalError", message: "Must provide an allowed value for setting (x.y)." } };
+    });
+  }
+});
+
 test("policy overwrite: a PATCH answered 500 is sent once and says the change may have gone through", async () => {
   pol.src = [policy("sp-1", "Laptops")];
   pol.dst = [policy("dp-1", "Laptops")];
@@ -335,6 +407,18 @@ test("device move: a trigger answered 500 that no read-back finds fails, leaves 
     /A read-back did not find it yet\. The change may still have gone through: check the destination before trying again\. The Migrations page lists the jobs on both tenants/,
   );
   assert.deepEqual(migrationWrites(), ["dst POST", "src PUT"], "no DELETE of a receiving job that may be in use");
+});
+
+test("device move: a job the sending tenant shows without saying it is sending does not count as started", async () => {
+  fake.on(SRC, "GET", "/endpoint/v1/migrations/job-9", () => ({ body: { id: "job-9" } }));
+  try {
+    fake.reset();
+    await assert.rejects(() => startMigration({ jobName: "unclear trigger 3", endpointIds: [DEVICE] }), /A read-back did not find it yet/);
+  } finally {
+    fake.on(SRC, "GET", "/endpoint/v1/migrations/job-9", () => (senderKnowsJob
+      ? { body: { id: "job-9", mode: "sending" } }
+      : { status: 404, body: { error: "NotFound", message: "no such job" } }));
+  }
 });
 
 test("device move: a receiving job answered 500 is not retried and no trigger is sent", async () => {

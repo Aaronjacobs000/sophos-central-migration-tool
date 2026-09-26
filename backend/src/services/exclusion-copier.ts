@@ -26,7 +26,7 @@ import {
 import { listLocalSites, createLocalSite } from "../sophos/api/web-control.js";
 import { requireContext } from "../state.js";
 import { auditOrWarn } from "./audit-log.js";
-import { createChecked, isUnclearWrite, notFound, readBack, foundNote } from "./write-check.js";
+import { createChecked, earlierUnclear, isUnclearWrite, notFound, readBack, foundNote } from "./write-check.js";
 
 export type ExclusionType =
   | "scanning"
@@ -91,6 +91,8 @@ export async function copyExclusions(
 
     const keyOf = (item: any) => keyFor(type, item);
     const destKeys = new Set(destItems.map(keyOf));
+    // Items whose create got no clear answer: a second one could be a duplicate.
+    const unclearKeys = new Set<string>();
     const sourceById = new Map(sourceItems.map((it: any) => [idOf(type, it), it]));
 
     if (type === "tls-excluded-websites") {
@@ -118,6 +120,10 @@ export async function copyExclusions(
           ok: true,
           action: "skip-exists",
         });
+        continue;
+      }
+      if (unclearKeys.has(keyOf(item))) {
+        results.push({ type, sourceId: id, ok: false, action: "create", error: earlierUnclear("value") });
         continue;
       }
 
@@ -162,6 +168,7 @@ export async function copyExclusions(
         });
       } catch (err) {
         const msg = errMsg(err);
+        if (isUnclearWrite(err)) unclearKeys.add(keyOf(item));
         await auditOrWarn({
           side: "dest",
           tenantId: dst.tenantId,
@@ -308,12 +315,12 @@ async function copyTlsExcludedWebsites(
           const there = new Set((await listTlsExcludedWebsites(dst.client, dst.tenantId)).map((w) => keyFor(type, w)));
           return batch.filter((w) => there.has(keyFor(type, w)));
         };
-        let found = await readBack(async () => {
+        const back = await readBack(async () => {
           const got = await present();
           return got.length === wanted.size ? got : undefined;
         });
-        if (!found) found = await present().catch(() => []);
-        if (!found.length) throw notFound(err);
+        const found = back.value ?? (back.unread ? [] : await present().catch(() => []));
+        if (!found.length) throw notFound(err, back.unread);
         res = { added: found };
         note = foundNote(err, "the website");
         if (found.length < batch.length) unclear = notFound(err).message;

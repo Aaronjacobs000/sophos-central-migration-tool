@@ -619,20 +619,51 @@ function onMemberPick(e) {
   const id = select.dataset.memberPick;
   if (select.value === "") delete state.memberChoices[id];
   else state.memberChoices[id] = select.value === "none" ? null : select.value;
-  loadMembership(true);
+  loadMembership(true, { quiet: true });
 }
 
-async function loadMembership(dryRun) {
+// Each preview or write is numbered, and only the latest one's answer is drawn.
+let membershipSeq = 0;
+
+/**
+ * Previews (dryRun) or writes the group changes. Add to groups stays off until
+ * the answer is drawn, so it always sends what the table shows. A preview
+ * after a pick (quiet) keeps the table while it runs and puts the focus back
+ * on the picker, so the keyboard can step through a list.
+ */
+async function loadMembership(dryRun, { quiet = false } = {}) {
+  const seq = ++membershipSeq;
   const body = document.getElementById("membership-body");
-  body.innerHTML = `<p class="hint"><span class="spin"></span> ${dryRun ? "Working out which devices go where" : "Adding devices to groups"}</p>`;
+  document.getElementById("membership-apply").disabled = true;
+  const focused = document.activeElement?.dataset?.memberPick;
+  if (quiet) document.getElementById("membership-summary").innerHTML = `<span class="spin"></span>`;
+  else body.innerHTML = `<p class="hint"><span class="spin"></span> ${dryRun ? "Working out which devices go where" : "Adding devices to groups"}</p>`;
+  const choices = dryRun ? state.memberChoices : shownChoices();
   try {
-    const res = await api.post(`/api/migrate/devices/jobs/${encodeURIComponent(state.id)}/group-membership`, { dryRun, choices: state.memberChoices });
+    const res = await api.post(`/api/migrate/devices/jobs/${encodeURIComponent(state.id)}/group-membership`, { dryRun, choices });
+    if (seq !== membershipSeq) return res;
+    state.membershipShown = res;
     renderMembership(res);
+    if (focused) document.querySelector(`[data-member-pick="${CSS.escape(focused)}"]`)?.focus();
     return res;
   } catch (err) {
-    body.innerHTML = `<div class="banner banner-err">${esc(err.message || "Group membership check failed")}</div>`;
+    if (seq === membershipSeq) body.innerHTML = `<div class="banner banner-err">${esc(err.message || "Group membership check failed")}</div>`;
     return null;
   }
+}
+
+/**
+ * The picks for a write: the group each pickable row shows, or null for a row
+ * shown with no group, so a group that appears after the preview is never
+ * used unseen.
+ */
+function shownChoices() {
+  const choices = { ...state.memberChoices };
+  for (const r of state.membershipShown?.rows ?? []) {
+    if (!r.newId || !PICKABLE.has(r.status) || r.endpointId in choices) continue;
+    choices[r.endpointId] = (r.status === "will-add" || r.status === "already-member") && r.destGroupId ? r.destGroupId : null;
+  }
+  return choices;
 }
 
 async function applyMembership() {
