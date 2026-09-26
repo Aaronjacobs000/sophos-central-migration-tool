@@ -34,6 +34,8 @@ Policy assignments cannot be migrated because the public API rejects every `appl
 
 When a web control policy points at a web filtering profile, the clone maps the profile ID to the destination profile with the same name. If the destination has no such profile, the policy is not cloned and the result names the profile to copy first, because Sophos refuses a web control policy without its profile. The deep match and Compare show the profile by name, so a correct clone matches.
 
+A Linux runtime detection policy points at a detection profile by ID and version. The clone maps it to the destination profile with the same name, at that profile's latest version, because each tenant numbers its own versions. The tool does not copy these profiles: if the destination has no profile of that name, the policy is not cloned and the result names the profile to create there first. The deep match and Compare show the profile by name, and a version that is the profile's latest as "latest".
+
 ### Web filtering
 
 Site lists and web filtering profiles copy to the destination. Copy site lists first: a profile refers to site lists by ID, and the copy maps each one to the destination list with the same name. Profile links to policies are not copied; cloning the web control policy makes the link. A copy ends with a list of what was created, with notes on anything that was mapped or left out. A tick marks a source list or profile that is already on the destination. Destination site lists and profiles can be deleted from a row menu to undo a copy, after a preview and a double confirmation; each delete is audited.
@@ -146,7 +148,8 @@ backend/
         tenant-resolver.ts       # /whoami, tenant list, regional host cache (from sophos-mcp)
       types/                     # API response types
       api/                       # One wrapper per API: policies, groups, exclusions,
-                                 # endpoints, migrations, web filters, licences, settings
+                                 # endpoints, migrations, web filters, runtime detection
+                                 # profiles, licences, settings
     routes/                      # Express routes
     services/                    # Policy, group, exclusion and web filter copies, device
                                  # migration, group membership, pre-flight and licence checks

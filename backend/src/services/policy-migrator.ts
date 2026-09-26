@@ -17,11 +17,18 @@
  * tenant's IDs mean nothing on the destination, so the ID is mapped to the
  * destination profile with the same name. When there is none the policy is
  * not written, and the result says which profile to copy first.
+ *
+ * Linux runtime detection policies name their detection profile by ID and
+ * version. The ID is mapped the same way, and the version is set to the
+ * destination profile's latest, because each tenant counts its own versions.
+ * The tool does not copy these profiles, so when the destination has none of
+ * that name the policy is not written, and the result names the profile.
  */
 
 import { getPolicy, listPolicies, createPolicy, updatePolicy } from "../sophos/api/policies.js";
 import { listLocalSites } from "../sophos/api/web-control.js";
 import { listProfiles } from "../sophos/api/web-filters.js";
+import { listRuntimeDetectionProfiles } from "../sophos/api/runtime-detection.js";
 import { requireContext } from "../state.js";
 import { audit } from "./audit-log.js";
 import { pairPolicy } from "../compare/policy-pairing.js";
@@ -88,6 +95,21 @@ export async function migratePolicies(
       return {
         sourceNameById: new Map(s.map((p) => [p.id, p.name])),
         destIdByName: new Map(d.map((p) => [p.name.trim().toLowerCase(), p.id])),
+      };
+    })());
+
+  // Linux runtime detection profiles on both sides, looked up at most once per
+  // run and only when a policy refers to one.
+  let runtimeMapPromise: Promise<RuntimeProfileMap> | undefined;
+  const runtimeProfiles = () =>
+    (runtimeMapPromise ??= (async () => {
+      const [s, d] = await Promise.all([
+        listRuntimeDetectionProfiles(src.client, src.tenantId),
+        listRuntimeDetectionProfiles(dst.client, dst.tenantId),
+      ]);
+      return {
+        sourceNameById: new Map(s.map((p) => [p.id, p.name])),
+        destByName: new Map(d.map((p) => [p.name.trim().toLowerCase(), { id: p.id, version: p.version }])),
       };
     })());
 
@@ -179,7 +201,9 @@ export async function migratePolicies(
       }
     }
 
-    const unmapped = await remapWebProfiles(body.settings, webProfiles, adjustments);
+    const unmapped =
+      (await remapWebProfiles(body.settings, webProfiles, adjustments)) ??
+      (await remapRuntimeProfiles(body.settings, runtimeProfiles, adjustments));
     if (unmapped) {
       // Nothing is sent: the destination refuses the policy without its profile.
       results[i] = {
@@ -381,6 +405,65 @@ export async function remapWebProfiles(
       settings[key] = next;
       adjustments.push("mapped the profiles in the web profile schedule to the destination");
     }
+  }
+}
+
+export interface RuntimeProfileMap {
+  sourceNameById: Map<string, string>;
+  destByName: Map<string, { id: string; version: number }>;
+}
+
+export const RUNTIME_PROFILE_ID_SUFFIX = "runtime-detection.profile-id";
+export const RUNTIME_PROFILE_VERSION_SUFFIX = "runtime-detection.profile-version";
+
+/** The version setting that goes with a runtime detection profile ID setting. */
+export const runtimeVersionKey = (idKey: string) =>
+  idKey.slice(0, -RUNTIME_PROFILE_ID_SUFFIX.length) + RUNTIME_PROFILE_VERSION_SUFFIX;
+
+/**
+ * Point a Linux runtime detection policy at the destination profile with the
+ * same name, at that profile's latest version. Each tenant counts its own
+ * versions, and the API takes a missing version as 1, not the latest, and
+ * refuses a version the profile doesn't have (all measured 26/09/2026).
+ *
+ * A profile ID with no destination counterpart returns the reason the policy
+ * can't be written: the destination refuses the source's profile ID ("Error
+ * processing data"), and a blank one while detection is on ("Bad request",
+ * both measured 26/09/2026). The tool does not copy these profiles.
+ */
+export async function remapRuntimeProfiles(
+  settings: Record<string, unknown> | undefined,
+  loadMap: () => Promise<RuntimeProfileMap>,
+  adjustments: string[],
+): Promise<string | undefined> {
+  if (!settings) return;
+  const idKeys = Object.keys(settings).filter((k) => {
+    const v = (settings[k] as { value?: unknown } | undefined)?.value;
+    return k.endsWith(RUNTIME_PROFILE_ID_SUFFIX) && typeof v === "string" && v.length > 0;
+  });
+  if (idKeys.length === 0) return;
+
+  let map: RuntimeProfileMap;
+  try {
+    map = await loadMap();
+  } catch (err) {
+    adjustments.push(`could not look up Linux runtime detection profiles, so the profile ID was sent unchanged (${errMsg(err)})`);
+    return;
+  }
+
+  for (const key of idKeys) {
+    const setting = settings[key] as { value: string };
+    const name = map.sourceNameById.get(setting.value);
+    const dest = name ? map.destByName.get(name.trim().toLowerCase()) : undefined;
+    if (!dest) {
+      return name
+        ? `Linux runtime detection profile "${name}" is not on the destination: create a profile with that name there first, then clone again`
+        : `Linux runtime detection profile ${setting.value} was not found on the source, so there is no destination profile to point the policy at`;
+    }
+    settings[key] = { ...setting, value: dest.id };
+    const versionKey = runtimeVersionKey(key);
+    settings[versionKey] = { ...(settings[versionKey] as object | undefined), value: dest.version };
+    adjustments.push(`mapped Linux runtime detection profile "${name}" to the destination profile with the same name, at its latest version (${dest.version})`);
   }
 }
 

@@ -103,10 +103,18 @@
       </section>
 
       <section class="panel-card">
+        <h2>Policies</h2>
+        <p>A Linux runtime detection policy uses a detection profile. The clone points it at the destination profile
+          with the same name, at that profile's latest version. The tool does not copy these profiles: with no such
+          profile the policy is not cloned, and the result names the profile to create on the destination first.</p>
+      </section>
+
+      <section class="panel-card">
         <h2>Order of work</h2>
         <ol>
           <li>Website Management entries (Exclusions page), because web control policies refer to their tags.</li>
           <li>Web filtering site lists, then profiles.</li>
+          <li>Linux runtime detection profiles, created on the destination by hand, because their policies refer to them.</li>
           <li>Groups and policies.</li>
           <li>Other exclusions and lists.</li>
           <li>Devices, then group membership from the job page.</li>

@@ -14,12 +14,15 @@ import {
   listBlockedItems,
 } from "../sophos/api/exclusions.js";
 import { listProfiles } from "../sophos/api/web-filters.js";
+import { listRuntimeDetectionProfiles } from "../sophos/api/runtime-detection.js";
 import { diff, summarize } from "../compare/json-diff.js";
 import { pairPolicy } from "../compare/policy-pairing.js";
 import { log } from "../log.js";
 import {
   WEB_PROFILE_ID_SUFFIX,
   WEB_PROFILE_SCHEDULES_SUFFIX,
+  RUNTIME_PROFILE_ID_SUFFIX,
+  runtimeVersionKey,
 } from "../services/policy-migrator.js";
 import type { SophosPolicy } from "../sophos/types/migration.js";
 import type { TenantContext, TenantLabel } from "../sophos/tenant-context.js";
@@ -154,13 +157,13 @@ compareRouter.get("/compare/policies/:sourceId/:destId?", async (req, res, next)
     const [srcSettings, dstSettings] = await withProfileNames(
       sourcePolicy.settings ?? {},
       fullDest.settings ?? {},
-      () => webProfileNames(src, dst),
+      profileLookups(src, dst),
     );
     const changes = diff(srcSettings, dstSettings);
     res.json({
       sourcePolicy,
       destPolicy: fullDest,
-      // The settings as compared: web profile IDs swapped for profile names.
+      // The settings as compared: web and runtime detection profile IDs swapped for profile names.
       settings: { source: srcSettings, dest: dstSettings },
       changes,
       summary: summarize(changes),
@@ -327,10 +330,9 @@ export async function computeDeepMatch(): Promise<DeepPolicyMatchResult> {
     }
   }
 
-  // Web filtering profile names on both sides, looked up at most once per run
-  // and only when a policy refers to a profile.
-  let profileNamesPromise: Promise<[Map<string, string>, Map<string, string>]> | undefined;
-  const profileNames = () => (profileNamesPromise ??= webProfileNames(src, dst));
+  // Profile names on both sides, looked up at most once per run and only when
+  // a policy refers to a profile.
+  const profileNames = profileLookups(src, dst);
 
   // Concurrency-limited deep fetch + diff for the matched pairs.
   const queue = [...matchedPairs];
@@ -468,15 +470,46 @@ async function webProfileNames(
   return [named(s), named(d)];
 }
 
-/** Both policies' settings with web profile IDs swapped for names, when either names a profile. */
+/** A Linux runtime detection profile's name and latest version on one tenant. */
+interface RuntimeProfileRef {
+  name: string;
+  latest: number;
+}
+
+interface ProfileLookups {
+  web: () => Promise<[Map<string, string>, Map<string, string>]>;
+  runtime: () => Promise<[Map<string, RuntimeProfileRef>, Map<string, RuntimeProfileRef>]>;
+}
+
+/** Both kinds of profile lookup for a tenant pair, each made at most once. */
+function profileLookups(src: TenantContext, dst: TenantContext): ProfileLookups {
+  let web: ReturnType<ProfileLookups["web"]> | undefined;
+  let runtime: ReturnType<ProfileLookups["runtime"]> | undefined;
+  return {
+    web: () => (web ??= webProfileNames(src, dst)),
+    runtime: () => (runtime ??= runtimeProfileNames(src, dst)),
+  };
+}
+
+/**
+ * Both policies' settings with web and runtime detection profile IDs swapped
+ * for names, when either policy names a profile of that kind.
+ */
 async function withProfileNames(
   srcSettings: Record<string, unknown>,
   dstSettings: Record<string, unknown>,
-  names: () => Promise<[Map<string, string>, Map<string, string>]>,
+  lookups: ProfileLookups,
 ): Promise<[Record<string, unknown>, Record<string, unknown>]> {
-  if (!refersToWebProfile(srcSettings) && !refersToWebProfile(dstSettings)) return [srcSettings, dstSettings];
-  const [srcNames, dstNames] = await names();
-  return [webProfilesByName(srcSettings, srcNames), webProfilesByName(dstSettings, dstNames)];
+  let [s, d] = [srcSettings, dstSettings];
+  if (refersToWebProfile(s) || refersToWebProfile(d)) {
+    const [srcNames, dstNames] = await lookups.web();
+    [s, d] = [webProfilesByName(s, srcNames), webProfilesByName(d, dstNames)];
+  }
+  if (refersToRuntimeProfile(s) || refersToRuntimeProfile(d)) {
+    const [srcRefs, dstRefs] = await lookups.runtime();
+    [s, d] = [runtimeProfilesByName(s, srcRefs), runtimeProfilesByName(d, dstRefs)];
+  }
+  return [s, d];
 }
 
 const isWebProfileKey = (key: string) =>
@@ -515,6 +548,83 @@ function webProfilesByName(
   const out = { ...settings };
   for (const key of Object.keys(out)) {
     if (isWebProfileKey(key)) out[key] = swap(out[key]);
+  }
+  return out;
+}
+
+/**
+ * A tenant's Linux runtime detection profiles by ID. A failed lookup gives an
+ * empty map, so that side's IDs are compared as they are and still show as a
+ * change.
+ */
+async function runtimeProfilesById(
+  ctx: TenantContext,
+  side: TenantLabel,
+): Promise<Map<string, RuntimeProfileRef>> {
+  try {
+    const profiles = await listRuntimeDetectionProfiles(ctx.client, ctx.tenantId);
+    return new Map(profiles.map((p) => [p.id, { name: p.name, latest: p.version }]));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log.emit(
+      "warn",
+      "compare",
+      `Linux runtime detection profile lookup failed, so its profile IDs are compared as they are: ${message}`,
+      { side },
+    );
+    return new Map();
+  }
+}
+
+/**
+ * Both tenants' runtime detection profiles by ID, with one name for each
+ * profile, matched the way webProfileNames() matches web profiles.
+ */
+async function runtimeProfileNames(
+  src: TenantContext,
+  dst: TenantContext,
+): Promise<[Map<string, RuntimeProfileRef>, Map<string, RuntimeProfileRef>]> {
+  const [s, d] = await Promise.all([runtimeProfilesById(src, "source"), runtimeProfilesById(dst, "dest")]);
+  const key = (name: string) => name.trim().toLowerCase();
+  const shown = new Map<string, string>();
+  for (const { name } of [...s.values(), ...d.values()]) {
+    if (!shown.has(key(name))) shown.set(key(name), name.trim());
+  }
+  const named = (m: Map<string, RuntimeProfileRef>) =>
+    new Map([...m].map(([id, ref]) => [id, { ...ref, name: shown.get(key(ref.name))! }]));
+  return [named(s), named(d)];
+}
+
+/** True when a runtime detection profile ID setting holds a value. */
+function refersToRuntimeProfile(settings: Record<string, unknown>): boolean {
+  return Object.keys(settings).some((key) => {
+    const v = (settings[key] as { value?: unknown } | undefined)?.value;
+    return key.endsWith(RUNTIME_PROFILE_ID_SUFFIX) && typeof v === "string" && v.length > 0;
+  });
+}
+
+/**
+ * A runtime detection policy names its profile by ID and version, and both
+ * are the tenant's own. Swap the ID for the profile's name, and a version that
+ * is the profile's latest for "latest", so a clone (which points at the
+ * destination profile's latest version) compares equal. An ID the tenant
+ * doesn't know, and an older version, are left as they are, so they still
+ * show as a change.
+ */
+function runtimeProfilesByName(
+  settings: Record<string, unknown>,
+  refs: Map<string, RuntimeProfileRef>,
+): Record<string, unknown> {
+  const out = { ...settings };
+  for (const key of Object.keys(out)) {
+    if (!key.endsWith(RUNTIME_PROFILE_ID_SUFFIX)) continue;
+    const setting = out[key] as { value?: unknown };
+    const ref = typeof setting?.value === "string" ? refs.get(setting.value) : undefined;
+    if (!ref) continue;
+    out[key] = { ...setting, value: ref.name };
+    const versionKey = runtimeVersionKey(key);
+    const version = out[versionKey] as { value?: unknown } | undefined;
+    if (version?.value === ref.latest) out[versionKey] = { ...version, value: "latest" };
   }
   return out;
 }
