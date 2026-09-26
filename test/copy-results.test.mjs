@@ -72,8 +72,9 @@ test("policy Compare: an overwrite or clone shows the results list, which stays 
   assert.match(write, /showResults\(results, overwrite\);/);
   // A request that fails outright is a failed row with its reason.
   assert.match(write, /results = \[\{ sourceId: state\.sourcePolicy\.id, ok: false, [^\]]*error: err\.message/);
-  // Compare runs again in place: a page reload would close the list.
-  assert.match(write, /if \(results\.some\(\(r\) => r\.ok\)\) await load\(\);/);
+  // Compare runs again in place: a page reload would close the list. The
+  // destination's cached policies are refreshed first, so the Policies page shows the write.
+  assert.match(write, /if \(results\.some\(\(r\) => r\.ok\)\) \{\s*await refreshSection\("dest", "policies"\)\.catch\(\(\) => \{\}\);\s*await load\(\);\s*\}/);
   assert.doesNotMatch(js, /location\.reload/);
   const list = js.slice(js.indexOf("function showResults"));
   assert.match(list, /outcome: r\.ok && r\.action === "overwrite" \? "updated" : outcomeOf\(r\)/);

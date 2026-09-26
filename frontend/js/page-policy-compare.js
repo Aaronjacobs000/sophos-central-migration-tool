@@ -9,6 +9,7 @@ import {
 } from "./diff-view.js";
 import { toast } from "./toast.js";
 import { plural, resultsModal, outcomeOf } from "./ui.js";
+import { refreshSection } from "./preload-client.js";
 
 const state = {
   sourcePolicy: null,
@@ -202,7 +203,11 @@ async function cloneToDest() {
   }
   showResults(results, overwrite);
   // Compare again so the page shows the new state. The results list stays open over it.
-  if (results.some((r) => r.ok)) await load();
+  // Refresh the destination's cached policies too, so the Policies page shows the write.
+  if (results.some((r) => r.ok)) {
+    await refreshSection("dest", "policies").catch(() => {});
+    await load();
+  }
 }
 
 /**
