@@ -460,8 +460,7 @@ async function pollOnce(localJobId: string): Promise<LocalMigrationJob | null> {
 
 /**
  * The group each device is in, from the endpoint records the preflight
- * already read. Membership has to be captured before the move: once a device
- * leaves, the sending tenant no longer lists it.
+ * already read, so the job keeps the group each device was in when it moved.
  */
 function groupSnapshot(endpoints: SophosEndpoint[]): Record<string, EndpointGroupRef | null> {
   const out: Record<string, EndpointGroupRef | null> = {};
