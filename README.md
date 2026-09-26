@@ -51,8 +51,17 @@ Eight global lists copy with the same duplicate check: scanning exclusions, allo
 - Before you start, the Start migration page reads the Device Migration setting on both tenants and says whether it is on, when it ends, or whether it closes within a day. Both tenants must allow migration, so the tool creates no job, and a dry run does not pass, while either one has it off or expired.
 - It also reads both tenants' licences, compares the destination's free seats with the selected computers and servers, and flags products the source has that the destination lacks (endpoint and server protection, XDR, MDR, Device Encryption). Product names map loosely to features, so this warns and never blocks.
 - A dry run shows the calls the real run would make, and the groups the selected devices are in.
-- The job page follows both sides through a server-sent event stream, with a progress bar and a row per device.
-- Sophos reports a device moved within seconds, but the device only arrives when it next checks in to the receiving tenant, under a new ID (about 24 minutes in testing). The job page shows each device as waiting for check-in until then, with its new ID, and keeps following the job until every device has checked in.
+- Each job has the name you give it when you start it. The Migrations page shows the name with the route under it, and the job page uses it as its title.
+- Sophos reports a device moved within seconds, but the device only arrives when it next checks in to the receiving tenant, under a new ID (about 24 minutes in testing). So a job's status follows the devices' check-ins:
+  - Requested: Sophos has accepted the job and no device has checked in to the receiving tenant yet.
+  - In progress: at least one device has checked in.
+  - Completed: every device has checked in.
+  - Completed with failures: every device has either checked in or failed, and at least one failed. Failed: none checked in.
+  - A device fails only when Sophos reports it failed, or when the job expires (14 days after it was created) before the device checked in. A device that is still waiting, such as a laptop that is switched off, stays waiting and shows how long it has waited.
+- Clicking a job opens a monitor: the sending tenant on the left, the receiving tenant on the right, and a row per device showing whether it has moved, with its new ID and check-in time once it arrives. A progress ring shows the share of devices that have arrived, and the Migrations page shows a small version of it next to each job.
+- The monitor refreshes itself and can be left open: it checks every 10 seconds during the handover and every 30 seconds while devices wait to check in, slows to every 5 minutes while the job's credentials are refused, and stops once the job has finished. It shows when it last checked and when it checks next, and reconnects on its own if the tool restarts. *Wall view* hides the menus, scales the page to the screen and pages through the devices when they don't all fit. The Migrations page refreshes every 30 seconds.
+- Each job records the tenants it ran against and stores its own credentials, encrypted (see [Security](#security)), so it keeps checking the right tenants after the tool is pointed at another pair. If Sophos later refuses those credentials, for example because they were deleted in Sophos Fusion, the job page and the Migrations page say "credentials rejected", keep showing the last known state with the time of the last successful check, and offer to attach new credentials. A failed check never replaces what the job last saw.
+- Jobs started with earlier builds of the tool have no stored credentials. The job page says so and can attach the tool's current connection, or entered tenant credentials, after checking that both tenants know the job.
 - The Migrations page merges jobs from both tenants' APIs with the ones started here, so moves started in the Sophos Fusion console or from another workstation show too.
 - Jobs are kept in `data/migration-jobs.json`, so a job page still opens after a browser refresh or a server restart.
 - A started migration can't be cancelled. The Sophos migrations API has no cancel or delete (DELETE answered 404 on 25/09/2026), so the tool has no Cancel button. A receiving job that the sending tenant never picks up stays listed until it expires, 14 days after it was created.
@@ -144,6 +153,7 @@ test/                            # node:test suites against a fake Sophos API
 
 data/                            # Created at run time, not committed
   migration-jobs.json            # Local migration jobs
+  job-credentials.json           # Each job's credentials, encrypted (key kept outside the repo)
   audit.log                      # Copies, clones and migrations
 
 .env                             # Not committed, managed by the UI
@@ -156,6 +166,13 @@ data/                            # Created at run time, not committed
 - Credentials are stored in **plain text** in `.env` at the repo root. Run the tool only on a trusted workstation with full-disk encryption, and do not commit, back up or sync `.env` to cloud drives. `.gitignore` excludes it.
 - The API never returns secrets. The credentials page shows masked values.
 - A device move's handshake token is used once, for the sender trigger. It is not saved in `data/migration-jobs.json`, and the Logs page, `/api/logs` and error messages mask it.
+- Each migration job stores the credentials it needs to check its progress later, so it keeps working after the tool is pointed at other tenants:
+  - They are encrypted with AES-256-GCM in `data/job-credentials.json`. There is one entry per API credential, shared by every job that used it, and jobs refer to it by an opaque ID.
+  - The 256-bit key is created on first use in `~/.sophos-tenant-migration-tool/job-credentials.key` (mode 0600, in a 0700 folder), outside the repo, so copying, syncing or sharing the repo or `data/` does not expose a secret. Set `JOB_CREDENTIALS_KEY_FILE` to keep the key somewhere else.
+  - No route returns them, and the job page and `/api/migrate/devices/jobs` only say whether they are stored. They are masked in logs and error messages.
+  - Limits: anyone who can read both the key and `data/` as your user can decrypt them, the same trust as the plain-text `.env`. On Windows the file modes are not enforced, so rely on the user profile's own permissions. If the key is lost (another computer, or the file deleted), jobs say their credentials can't be read, and you can attach them again.
+  - The job page has *Remove stored credentials*. Use it once a job has finished; an entry no job uses is deleted. The tool's own `.env` is not changed.
+  - They are stored rather than read from `.env` because `.env` holds only the pair the tool points at now, so a reference into it would break, or point at the wrong tenants, as soon as the tool is repointed.
 - Copies and migrations can be run as a dry run first, which returns what would be created or changed without touching the destination.
 - Copies, clones and migrations are recorded in `data/audit.log` with a timestamp, ID, side, tenant ID, resource and result.
 - Deleting a policy, group or exclusion asks for confirmation twice. Overwriting a policy asks once.
