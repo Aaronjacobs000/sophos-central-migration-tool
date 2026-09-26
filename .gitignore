@@ -1,6 +1,8 @@
 # Environment & secrets
 .env
 .env.local
+# Temp copies left by an interrupted .env save hold the same secrets
+..env.*.tmp
 
 # Runtime state
 data/
