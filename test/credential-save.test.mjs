@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { promises as fsp } from "node:fs";
 import { readFile, writeFile, readdir, stat, chmod } from "node:fs/promises";
 import path from "node:path";
+import { existsSync } from "node:fs";
 import { createFakeSophos } from "./helpers/fake-sophos.mjs";
 import { bootApp } from "./helpers/app.mjs";
 
@@ -175,4 +176,39 @@ test("a file that can't be read, with no usable backup, is an error that quotes 
     await writeFile(backupFile, backup);
   }
   assert.equal((await creds.getCredential(ids[0])).clientId, cred(0).clientId);
+});
+
+// The key file had no lock retries while every other file the tool keeps did (26/09/2026).
+test("the key file is created and read with the same lock retries as the other files", async () => {
+  const keyFile = path.join(root, "key-lock-test", "job-credentials.key");
+  const savedKeyPath = process.env.JOB_CREDENTIALS_KEY_FILE;
+  const readFileBefore = fsp.readFile;
+  const logStart = getRingBuffer().length;
+  let writes = 0;
+  let reads = 0;
+  process.env.JOB_CREDENTIALS_KEY_FILE = keyFile;
+  creds.resetKeyCache();
+  fsp.writeFile = async (file, ...rest) => {
+    if (is(file, keyFile) && writes++ < 2) throw lockError(file);
+    return original.writeFile(file, ...rest);
+  };
+  fsp.readFile = async (file, ...rest) => {
+    if (is(file, keyFile) && existsSync(keyFile) && reads++ < 2) throw lockError(file);
+    return readFileBefore(file, ...rest);
+  };
+  try {
+    const id = await creds.putCredential("tenant", cred(30));
+    creds.resetKeyCache();
+    assert.equal((await creds.getCredential(id)).clientId, cred(30).clientId, "the key read back decrypts the entry");
+  } finally {
+    Object.assign(fsp, original, { readFile: readFileBefore });
+    process.env.JOB_CREDENTIALS_KEY_FILE = savedKeyPath;
+    creds.resetKeyCache();
+  }
+  assert.equal(writes, 3, "created on the third try");
+  const lines = getRingBuffer().slice(logStart).map((e) => e.message);
+  assert.ok(lines.some((m) => /create job-credentials\.key: EBUSY, retry 1\/5/.test(m)));
+  assert.ok(lines.some((m) => /read job-credentials\.key: EBUSY, retry 1\/5/.test(m)));
+  if (!windows) assert.equal((await stat(keyFile)).mode & 0o777, 0o600);
+  assert.equal((await creds.getCredential(ids[0])).clientId, cred(0).clientId, "the tool's own key is back");
 });

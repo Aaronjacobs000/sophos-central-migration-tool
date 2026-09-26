@@ -27,7 +27,7 @@ import os from "node:os";
 import { createCipheriv, createDecipheriv, createHmac, randomBytes } from "node:crypto";
 import { getState } from "../state.js";
 import { log, registerSecret } from "../log.js";
-import { isLock, readWithBackup, saveWithBackup, type ReadFrom } from "./safe-files.js";
+import { isLock, readWithBackup, saveWithBackup, withRetry, type ReadFrom } from "./safe-files.js";
 
 export type CredentialKind = "tenant" | "partner";
 
@@ -75,24 +75,31 @@ const VAULT_MODE = 0o600;
 let keyPromise: Promise<Buffer> | null = null;
 let keyPromisePath: string | null = null;
 
-/** Reads the key, or creates it the first time (create=true). */
+/**
+ * Reads the key, or creates it the first time (create=true). Each step
+ * retries while antivirus or a sync tool holds the file, like the other
+ * files the tool keeps (safe-files.ts).
+ */
 async function loadKey(create: boolean): Promise<Buffer | null> {
   const file = keyFilePath();
   if (keyPromise && keyPromisePath === file) return keyPromise;
+  const readKey = async () => decodeKey(await withRetry(SECTION, "read job-credentials.key", () => fs.readFile(file, "utf8")));
   const attempt = (async () => {
     try {
-      return decodeKey(await fs.readFile(file, "utf8"));
+      return await readKey();
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT" || !create) throw err;
     }
-    await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+    await withRetry(SECTION, "create the key folder", () => fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 }));
     try {
-      await fs.writeFile(file, randomBytes(KEY_BYTES).toString("base64") + "\n", { mode: 0o600, flag: "wx" });
+      // "wx" creates the file only if there is none, so two first saves can't write two keys.
+      await withRetry(SECTION, "create job-credentials.key", () =>
+        fs.writeFile(file, randomBytes(KEY_BYTES).toString("base64") + "\n", { mode: 0o600, flag: "wx" }));
     } catch (err) {
       // Another request created it first.
       if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
     }
-    return decodeKey(await fs.readFile(file, "utf8"));
+    return readKey();
   })();
   try {
     const key = await attempt;
