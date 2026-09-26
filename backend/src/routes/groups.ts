@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { sideParam } from "../middleware/side-param.js";
 import { requireConfigured } from "../middleware/require-configured.js";
+import { jsonBody } from "../middleware/json-body.js";
 import {
   listGroups,
   getGroup,
@@ -51,7 +52,7 @@ groupsRouter.get("/:side/groups/:id/members", async (req, res, next) => {
   }
 });
 
-groupsRouter.post("/:side/groups", async (req, res, next) => {
+groupsRouter.post("/:side/groups", jsonBody, async (req, res, next) => {
   try {
     const ctx = res.locals.tenantContext!;
     const created = await createGroup(ctx.client, ctx.tenantId, req.body);
@@ -83,7 +84,7 @@ groupsRouter.get("/:side/user-groups", async (_req, res, next) => {
   }
 });
 
-groupsRouter.post("/:side/user-groups", async (req, res, next) => {
+groupsRouter.post("/:side/user-groups", jsonBody, async (req, res, next) => {
   try {
     const ctx = res.locals.tenantContext!;
     const created = await createUserGroup(ctx.client, ctx.tenantId, req.body);

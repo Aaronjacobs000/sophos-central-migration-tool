@@ -69,6 +69,10 @@ export async function startHttp(mounts) {
     post: (p, body) => call("POST", p, body ?? {}),
     /** A plain HTML form post, as another site could send. */
     form: (p, text) => call("POST", p, text, "application/x-www-form-urlencoded"),
+    /** A text/plain post, which another site can also send without a preflight. */
+    text: (p, text) => call("POST", p, text, "text/plain"),
+    /** A post with no body and no content type. */
+    bare: (p) => call("POST", p),
     events,
     close: () => new Promise((r) => server.close(r)),
   };

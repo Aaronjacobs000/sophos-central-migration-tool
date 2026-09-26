@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { sideParam } from "../middleware/side-param.js";
 import { requireConfigured } from "../middleware/require-configured.js";
+import { jsonBody } from "../middleware/json-body.js";
 import {
   listScanningExclusions,
   listAllowedItems,
@@ -62,7 +63,7 @@ for (const type of ["isolation", "intrusion-prevention", "exploit-mitigation", "
   });
 }
 
-exclusionsRouter.post("/:side/exclusions/scanning", async (req, res, next) => {
+exclusionsRouter.post("/:side/exclusions/scanning", jsonBody, async (req, res, next) => {
   try {
     const ctx = res.locals.tenantContext!;
     const created = await createScanningExclusion(ctx.client, ctx.tenantId, req.body);
@@ -72,7 +73,7 @@ exclusionsRouter.post("/:side/exclusions/scanning", async (req, res, next) => {
   }
 });
 
-exclusionsRouter.post("/:side/exclusions/allowed-items", async (req, res, next) => {
+exclusionsRouter.post("/:side/exclusions/allowed-items", jsonBody, async (req, res, next) => {
   try {
     const ctx = res.locals.tenantContext!;
     const created = await createAllowedItem(ctx.client, ctx.tenantId, req.body);
@@ -82,7 +83,7 @@ exclusionsRouter.post("/:side/exclusions/allowed-items", async (req, res, next) 
   }
 });
 
-exclusionsRouter.post("/:side/exclusions/blocked-items", async (req, res, next) => {
+exclusionsRouter.post("/:side/exclusions/blocked-items", jsonBody, async (req, res, next) => {
   try {
     const ctx = res.locals.tenantContext!;
     const created = await createBlockedItem(ctx.client, ctx.tenantId, req.body);

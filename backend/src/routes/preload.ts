@@ -4,10 +4,12 @@
  *   - Render list pages instantly from the cache (instead of waiting on a
  *     fresh round-trip to Sophos)
  *   - Manually refresh a single section if it failed
+ * The two POSTs accept JSON only, so another site can't start a reload.
  */
 
 import { Router } from "express";
 import { requireConfigured } from "../middleware/require-configured.js";
+import { jsonOnly } from "../middleware/json-body.js";
 import {
   getPreloadStatus,
   getSectionData,
@@ -25,7 +27,7 @@ preloadRouter.get("/preload/status", (_req, res) => {
   res.json(getPreloadStatus());
 });
 
-preloadRouter.post("/preload/start", (_req, res) => {
+preloadRouter.post("/preload/start", jsonOnly, (_req, res) => {
   startPreload();
   res.json({ ok: true, status: getPreloadStatus() });
 });
@@ -44,7 +46,7 @@ preloadRouter.get("/preload/data/:section/:side", (req, res) => {
   res.json(result);
 });
 
-preloadRouter.post("/preload/refresh/:section/:side", async (req, res, next) => {
+preloadRouter.post("/preload/refresh/:section/:side", jsonOnly, async (req, res, next) => {
   try {
     const { section, side } = req.params;
     if (side !== "source" && side !== "dest") {

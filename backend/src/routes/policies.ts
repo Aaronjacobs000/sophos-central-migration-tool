@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { sideParam } from "../middleware/side-param.js";
 import { requireConfigured } from "../middleware/require-configured.js";
+import { jsonBody } from "../middleware/json-body.js";
 import {
   listPolicies,
   getPolicy,
@@ -36,7 +37,7 @@ policiesRouter.get("/:side/policies/:id", async (req, res, next) => {
   }
 });
 
-policiesRouter.post("/:side/policies", async (req, res, next) => {
+policiesRouter.post("/:side/policies", jsonBody, async (req, res, next) => {
   try {
     const ctx = res.locals.tenantContext!;
     const created = await createPolicy(ctx.client, ctx.tenantId, req.body);

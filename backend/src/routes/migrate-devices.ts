@@ -8,7 +8,7 @@
  *   POST   /api/migrate/devices/jobs/:id/credentials     attach credentials to a job
  *   POST   /api/migrate/devices/jobs/:id/credentials/remove  remove them
  *   POST   /api/migrate/devices/jobs/:id/group-membership  put moved devices
- *          back into same-named groups (dryRun supported)
+ *          back into same-named groups ({ dryRun: true } or { dryRun: false })
  *
  * Jobs are checked with their own tenants and stored credentials
  * (services/job-access.ts), so only starting a job needs the tool's current
@@ -18,6 +18,7 @@
 
 import { Router } from "express";
 import { requireConfigured } from "../middleware/require-configured.js";
+import { jsonOnly } from "../middleware/json-body.js";
 import {
   startMigration,
   pollJob,
@@ -234,9 +235,17 @@ migrateDevicesRouter.post("/migrate/devices/jobs/:id/credentials/remove", jsonOn
   }
 });
 
-migrateDevicesRouter.post("/migrate/devices/jobs/:id/group-membership", async (req, res, next) => {
+/**
+ * The caller must say whether this is a dry run, in JSON, so a post from
+ * another site (or one that leaves dryRun out) never adds devices to groups.
+ */
+migrateDevicesRouter.post("/migrate/devices/jobs/:id/group-membership", jsonOnly, async (req, res, next) => {
   try {
-    const dryRun = req.query?.dryRun === "true" || req.body?.dryRun === true;
+    if (typeof req.body?.dryRun !== "boolean") {
+      res.status(400).json({ error: "bad_request", message: "dryRun (true or false) is required" });
+      return;
+    }
+    const dryRun = req.query?.dryRun === "true" || req.body.dryRun === true;
     res.json(await restoreGroupMembership(req.params.id!, { dryRun }));
   } catch (err) {
     if (err instanceof JobNotFoundError) {
@@ -338,18 +347,6 @@ migrateDevicesRouter.get("/migrate/devices/jobs/:id/stream", async (req, res) =>
     if (timer) clearTimeout(timer);
   });
 });
-
-/**
- * The credential routes accept JSON only. A page on another site can post a
- * form to 127.0.0.1 without the browser asking first, but not a JSON request.
- */
-function jsonOnly(req: import("express").Request, res: import("express").Response, next: import("express").NextFunction): void {
-  if (!req.is("application/json")) {
-    res.status(415).json({ error: "unsupported_media_type", message: "Send JSON." });
-    return;
-  }
-  next();
-}
 
 function cred(v: unknown): { clientId: string; clientSecret: string } {
   const o = (v ?? {}) as Record<string, unknown>;

@@ -140,7 +140,7 @@ backend/
     services/                    # Policy, group, exclusion and web filter copies, device
                                  # migration, group membership, pre-flight and licence checks
     compare/json-diff.ts         # Small structural diff
-    middleware/                  # requireConfigured, sideParam, errorHandler
+    middleware/                  # requireConfigured, sideParam, JSON-only guards, errorHandler
 
 frontend/                        # Plain HTML and ES modules, no build step
   *.html                         # One page per screen
@@ -163,6 +163,7 @@ data/                            # Created at run time, not committed
 ## Security
 
 - The server listens on **127.0.0.1 only**, so it is not reachable from the network.
+- Changes need a JSON request, or a PUT, PATCH or DELETE, which a browser sends to 127.0.0.1 for another site only after a CORS preflight that the server never answers. So a page on another site can't make a change by posting a form. Adding moved devices to groups also needs `dryRun` set to `true` or `false`.
 - Credentials are stored in **plain text** in `.env` at the repo root. Run the tool only on a trusted workstation with full-disk encryption, and do not commit, back up or sync `.env` to cloud drives. `.gitignore` excludes it.
 - The API never returns secrets. The credentials page shows masked values.
 - A device move's handshake token is used once, for the sender trigger. It is not saved in `data/migration-jobs.json`, and the Logs page, `/api/logs` and error messages mask it.
