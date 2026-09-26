@@ -26,6 +26,8 @@ A first-run wizard walks through either mode, tests the connection before saving
 
 Endpoint policies are grouped by product, source on the left and destination on the right. A deep match reads the full settings of every policy that exists on both sides, and each product shows a small bar of how many policies match, differ, or exist on one side only. You can hide products where everything matches.
 
+![Policies page. Application Control has one policy that matches, one that differs by one setting, one on the source only with a Clone button, and one on the destination only](docs/policies.png)
+
 Compare opens one table of settings grouped by section, with readable labels (the raw setting key shows when you hover a row). Clone copies a source-only policy to the bottom of the destination's priority order, just above the base policy, and Compare offers to overwrite a destination policy with the source version. Destination policies can be deleted from a row menu after a double confirmation.
 
 Policy assignments cannot be migrated because the public API rejects every `appliesTo` write. Export assignments (CSV) lists them so you can reassign them by hand.
@@ -34,7 +36,7 @@ When a web control policy points at a web filtering profile, the clone maps the 
 
 ### Web filtering
 
-Site lists and web filtering profiles copy to the destination. Copy site lists first: a profile refers to site lists by ID, and the copy maps each one to the destination list with the same name. Profile links to policies are not copied; cloning the web control policy makes the link. Destination site lists and profiles can be deleted from a row menu to undo a copy, after a preview and a double confirmation; each delete is audited.
+Site lists and web filtering profiles copy to the destination. Copy site lists first: a profile refers to site lists by ID, and the copy maps each one to the destination list with the same name. Profile links to policies are not copied; cloning the web control policy makes the link. A copy ends with a list of what was created, with notes on anything that was mapped or left out. Destination site lists and profiles can be deleted from a row menu to undo a copy, after a preview and a double confirmation; each delete is audited.
 
 ### Groups
 
@@ -42,7 +44,7 @@ Endpoint groups and user groups mirror to the destination by name and descriptio
 
 ### Exclusions and lists
 
-Eight global lists copy with the same duplicate check: scanning exclusions, allowed items, blocked items, isolation exclusions, intrusion prevention exclusions, custom exploit mitigation applications, Website Management entries, and websites excluded from TLS decryption. Rows that already exist on both sides are dimmed. Copy the Website Management entries before cloning web control policies, because those policies refer to their tags.
+Eight global lists copy with the same duplicate check: scanning exclusions, allowed items, blocked items, isolation exclusions, intrusion prevention exclusions, custom exploit mitigation applications, Website Management entries, and websites excluded from TLS decryption. A copy ends with a list of every item marked created, already there, or failed. Rows that already exist on both sides are dimmed. Copy the Website Management entries before cloning web control policies, because those policies refer to their tags.
 
 ### Device migration
 
@@ -62,9 +64,18 @@ Eight global lists copy with the same duplicate check: scanning exclusions, allo
 - The monitor refreshes itself and can be left open: it checks every 10 seconds during the handover and every 30 seconds while devices wait to check in, slows to every 5 minutes while the job's credentials are refused, and stops once the job has finished. It shows when it last checked and when it checks next, and reconnects on its own if the tool restarts. *Wall view* hides the menus, scales the page to the screen and pages through the devices when they don't all fit. The Migrations page refreshes every 30 seconds.
 - Each job records the tenants it ran against and stores its own credentials, encrypted (see [Security](#security)), so it keeps checking the right tenants after the tool is pointed at another pair. If Sophos later refuses those credentials, for example because they were deleted in Sophos Fusion, the job page and the Migrations page say "credentials rejected", keep showing the last known state with the time of the last successful check, and offer to attach new credentials. A failed check never replaces what the job last saw.
 - Jobs started with earlier builds of the tool have no stored credentials. The job page says so and can attach the tool's current connection, or entered tenant credentials, after checking that both tenants know the job.
+- Some jobs recorded their tenants by ID only and show "Tenant" and the start of the ID. The tool fills in the name when it can match the tenant ID to the tool's current connection (its label, or the partner's tenant list) or to another job. That happens when credentials are attached, when the job is next checked, and when the Migrations page loads. A recorded name is never changed.
 - The Migrations page merges jobs from both tenants' APIs with the ones started here, so moves started in the Sophos Fusion console or from another workstation show too.
 - Jobs are kept in `data/migration-jobs.json`, so a job page still opens after a browser refresh or a server restart.
 - A started migration can't be cancelled. The Sophos migrations API has no cancel or delete (DELETE answered 404 on 25/09/2026), so the tool has no Cancel button. A receiving job that the sending tenant never picks up stays listed until it expires, 14 days after it was created.
+
+The Migrations page, a job's monitor, and the same monitor in wall view:
+
+![Migrations page listing seven jobs with their status, a progress ring for each, and one job whose credentials were rejected](docs/migrations.png)
+
+![Monitor for a job of seven devices: three arrived with their new IDs, three waiting for check-in, one not handed over yet, and a ring at 42 percent](docs/job-monitor.png)
+
+![Wall view of a 36-device job without the menus, showing the first eight devices, the counts and the ring](docs/wall-view.png)
 
 ### Around the tool
 
@@ -110,7 +121,7 @@ The Sophos device migration API (`/endpoint/v1/migrations`) uses a two-tenant ha
 1. Pre-flight: Device Migration must be on in both tenants' Sophos Fusion consoles (*Overview > Global Settings > Device Migration*). The tool reads it with `GET /endpoint/v1/settings/migration` on each, shows the result before you start, and creates no job while either is off. A receiving tenant accepts a receiver job whatever the sending tenant's setting, and that job cannot be deleted through the API, so the check runs first.
 2. Receiver job: `POST /endpoint/v1/migrations` on the receiving tenant with `fromTenant` (the sending tenant's ID) and `endpoints` (the device IDs). The response has the job `id` and a handshake `token`.
 3. Sender trigger: `PUT /endpoint/v1/migrations/{jobId}` on the sending tenant with the same job ID, the `token` and the `endpoints`. This starts the move; it does not create a second job.
-4. Polling: both sides are polled every 10 seconds and the browser gets the updates as server-sent events. Each device goes from `pending` to `succeeded` or `failed`. The job's overall status comes from the device results, because the API does not fill in a job-level status.
+4. Polling: both sides are checked every 10 seconds while Sophos hands devices over and every 30 seconds while they wait to check in, and the browser gets the updates as server-sent events. Each device goes from `pending` to `succeeded` or `failed`. The job's overall status comes from the device results, because the API does not fill in a job-level status.
 5. Group membership: `GET /endpoint/v1/migrations/{jobId}/endpoints` returns each moved device's `newId`. The job page adds the new IDs to the destination groups named like the devices' source groups with `POST /endpoint/v1/endpoint-groups/{id}/endpoints`. The source groups are recorded when the job is created, because the sending tenant stops listing a device once it has moved.
 6. Check-in: `succeeded` means Sophos has handed the device over and registered it on the receiving tenant under its `newId`, offline, with `lastSeenAt` equal to `registeredAt`. The device arrives when it next checks in. The tool reads the new records with `GET /endpoint/v1/endpoints?ids=...` and counts a device as checked in once `lastSeenAt` passes `registeredAt` by more than a minute. It matches by ID, never by hostname, because the receiving tenant can hold older records with the same hostname.
 7. The 14-day window: devices must check in within 14 days for the move to land. The tool blocks stale devices when you select them and again before it creates the jobs.
@@ -151,6 +162,8 @@ frontend/                        # Plain HTML and ES modules, no build step
 
 test/                            # node:test suites against a fake Sophos API
 
+docs/                            # README screenshots (made against the fake API) and the Windows test plan
+
 data/                            # Created at run time, not committed
   migration-jobs.json            # Local migration jobs
   job-credentials.json           # Each job's credentials, encrypted (key kept outside the repo)
@@ -163,13 +176,15 @@ data/                            # Created at run time, not committed
 ## Security
 
 - The server listens on **127.0.0.1 only**, so it is not reachable from the network.
+- The tool has no sign-in of its own. Anyone who can reach it can use it, which means acting with the credentials in `.env` and the ones stored with jobs. Everyone who uses one copy shares its connection and its jobs, and the audit log does not record who made a change.
+- To share it with a team, run it on a server behind your own sign-in, for example a reverse proxy with single sign-on on the same server that forwards to `127.0.0.1:3100`. The listen address is set in `backend/src/server.ts`, so listening on any other address is a code change today.
 - Changes need a JSON request, or a PUT, PATCH or DELETE, which a browser sends to 127.0.0.1 for another site only after a CORS preflight that the server never answers. So a page on another site can't make a change by posting a form. Adding moved devices to groups also needs `dryRun` set to `true` or `false`.
 - Credentials are stored in **plain text** in `.env` at the repo root. Run the tool only on a trusted workstation with full-disk encryption, and do not commit, back up or sync `.env` to cloud drives. `.gitignore` excludes it.
 - The API never returns secrets. The credentials page shows masked values.
 - A device move's handshake token is used once, for the sender trigger. It is not saved in `data/migration-jobs.json`, and the Logs page, `/api/logs` and error messages mask it.
 - Each migration job stores the credentials it needs to check its progress later, so it keeps working after the tool is pointed at other tenants:
   - They are encrypted with AES-256-GCM in `data/job-credentials.json`. There is one entry per API credential, shared by every job that used it, and jobs refer to it by an opaque ID.
-  - The 256-bit key is created on first use in `~/.sophos-tenant-migration-tool/job-credentials.key` (mode 0600, in a 0700 folder), outside the repo, so copying, syncing or sharing the repo or `data/` does not expose a secret. Set `JOB_CREDENTIALS_KEY_FILE` to keep the key somewhere else.
+  - The 256-bit key is created on first use in `~/.sophos-tenant-migration-tool/job-credentials.key` (mode 0600, in a 0700 folder), outside the repo, so copying, syncing or sharing the repo or `data/` does not expose a secret. On Windows that is `%USERPROFILE%\.sophos-tenant-migration-tool\job-credentials.key`. Set `JOB_CREDENTIALS_KEY_FILE` to keep the key somewhere else.
   - No route returns them, and the job page and `/api/migrate/devices/jobs` only say whether they are stored. They are masked in logs and error messages.
   - Limits: anyone who can read both the key and `data/` as your user can decrypt them, the same trust as the plain-text `.env`. On Windows the file modes are not enforced, so rely on the user profile's own permissions. If the key is lost (another computer, or the file deleted), jobs say their credentials can't be read, and you can attach them again.
   - The job page has *Remove stored credentials*. Use it once a job has finished; an entry no job uses is deleted. The tool's own `.env` is not changed.
