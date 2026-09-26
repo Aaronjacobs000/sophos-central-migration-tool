@@ -26,6 +26,7 @@ import {
 import { listLocalSites, createLocalSite } from "../sophos/api/web-control.js";
 import { requireContext } from "../state.js";
 import { auditOrWarn } from "./audit-log.js";
+import { createChecked, isUnclearWrite, notFound, readBack, foundNote } from "./write-check.js";
 
 export type ExclusionType =
   | "scanning"
@@ -65,6 +66,8 @@ export interface CopyExclusionResult {
   ok: boolean;
   action: "create" | "skip-exists" | "dry-run-create";
   error?: string;
+  /** Notes for the results list, such as a create Sophos answered unclearly but a read-back found. */
+  notes?: string[];
 }
 
 export async function copyExclusions(
@@ -130,7 +133,11 @@ export async function copyExclusions(
 
       try {
         const body = bodyFor(type, item);
-        const created = await createForType(type, dst.client, dst.tenantId, body);
+        const key = keyOf(item);
+        const { value: created, note } = await createChecked(
+          () => createForType(type, dst.client, dst.tenantId, body),
+          async () => (await listForType(type, dst.client, dst.tenantId)).find((d) => keyOf(d) === key),
+        );
         destKeys.add(
           type === "scanning" || type === "allowed-items" || type === "blocked-items"
             ? itemKey({ ...item, id: created.id ?? "" })
@@ -143,7 +150,7 @@ export async function copyExclusions(
           resource: type,
           resourceId: created.id,
           ok: true,
-          detail: { sourceId: id, body },
+          detail: { sourceId: id, body, ...(note ? { note } : {}) },
         });
         results.push({
           type,
@@ -151,6 +158,7 @@ export async function copyExclusions(
           destId: created.id,
           ok: true,
           action: "create",
+          ...(note ? { notes: [note] } : {}),
         });
       } catch (err) {
         const msg = errMsg(err);
@@ -287,21 +295,44 @@ async function copyTlsExcludedWebsites(
   for (let i = 0; i < toAdd.length; i += TLS_BATCH) {
     const batch = toAdd.slice(i, i + TLS_BATCH);
     try {
-      const res = await addTlsExcludedWebsites(dst.client, dst.tenantId, batch);
+      let res: Awaited<ReturnType<typeof addTlsExcludedWebsites>>;
+      let note: string | undefined;
+      let unclear: string | undefined;
+      try {
+        res = await addTlsExcludedWebsites(dst.client, dst.tenantId, batch);
+      } catch (err) {
+        if (!isUnclearWrite(err)) throw err;
+        // Sophos gave no clear answer: read the list back and count what is on it.
+        const wanted = new Set(batch.map((w) => keyFor(type, w)));
+        const present = async () => {
+          const there = new Set((await listTlsExcludedWebsites(dst.client, dst.tenantId)).map((w) => keyFor(type, w)));
+          return batch.filter((w) => there.has(keyFor(type, w)));
+        };
+        let found = await readBack(async () => {
+          const got = await present();
+          return got.length === wanted.size ? got : undefined;
+        });
+        if (!found) found = await present().catch(() => []);
+        if (!found.length) throw notFound(err);
+        res = { added: found };
+        note = foundNote(err, "the website");
+        if (found.length < batch.length) unclear = notFound(err).message;
+      }
       const added = new Set((res.added ?? batch).map((w) => keyFor(type, w)));
       await auditOrWarn({
         side: "dest",
         tenantId: dst.tenantId,
         action: "update",
         resource: type,
-        ok: true,
-        detail: { add: batch, added: res.added ?? null },
+        ok: !unclear,
+        ...(unclear ? { error: unclear } : {}),
+        detail: { add: batch, added: res.added ?? null, ...(note ? { note } : {}) },
       });
       for (const w of batch) {
         const ok = added.has(keyFor(type, w));
         results.push(ok
-          ? { type, sourceId: w.value, destId: w.value, ok: true, action: "create" }
-          : { type, sourceId: w.value, ok: false, action: "create", error: "the destination did not report this website as added" });
+          ? { type, sourceId: w.value, destId: w.value, ok: true, action: "create", ...(note ? { notes: [note] } : {}) }
+          : { type, sourceId: w.value, ok: false, action: "create", error: unclear ?? "the destination did not report this website as added" });
       }
     } catch (err) {
       const msg = errMsg(err);

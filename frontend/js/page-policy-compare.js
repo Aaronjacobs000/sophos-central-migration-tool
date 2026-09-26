@@ -8,7 +8,7 @@ import {
   renderValue,
 } from "./diff-view.js";
 import { toast } from "./toast.js";
-import { plural, resultsModal, outcomeOf } from "./ui.js";
+import { plural, resultsModal, outcomeOf, notesOf } from "./ui.js";
 import { refreshSection } from "./preload-client.js";
 
 const state = {
@@ -220,7 +220,7 @@ function showResults(results, overwrite) {
     outcome: r.ok && r.action === "overwrite" ? "updated" : outcomeOf(r),
     text: state.sourcePolicy.name,
     error: r.error,
-    notes: r.adjustments,
+    notes: notesOf(r),
   }));
   const done = overwrite ? "updated" : "created";
   const count = (outcome) => rows.filter((r) => r.outcome === outcome).length;

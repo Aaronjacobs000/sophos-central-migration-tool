@@ -3,7 +3,7 @@ import { api } from "./api.js";
 import { toast } from "./toast.js";
 import { getCachedSection, refreshSection } from "./preload-client.js";
 import { makeSortable } from "./sortable.js";
-import { rowMenu, wireRowMenus, onDestCell, ON_DEST_HEADER, plural, resultsModal, outcomeOf, countOutcomes } from "./ui.js";
+import { rowMenu, wireRowMenus, onDestCell, ON_DEST_HEADER, plural, resultsModal, outcomeOf, countOutcomes, notesOf } from "./ui.js";
 
 const state = {
   activeTab: "endpoint", // "endpoint" | "user"
@@ -236,7 +236,7 @@ function nameOf(tab, id) {
 /** The results list: each group tagged created, already there or failed. */
 function showResults(endpoint, user) {
   const n = countOutcomes([...endpoint, ...user]);
-  const row = (tab) => (r) => ({ outcome: outcomeOf(r), text: nameOf(tab, r.sourceId), error: r.error });
+  const row = (tab) => (r) => ({ outcome: outcomeOf(r), text: nameOf(tab, r.sourceId), error: r.error, notes: notesOf(r) });
   resultsModal({
     title: "Mirror results",
     summary: `${plural(n.created, "group")} created on the destination. Each write is in data/audit.log.`,

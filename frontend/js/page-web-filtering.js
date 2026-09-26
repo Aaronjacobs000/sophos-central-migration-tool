@@ -2,7 +2,7 @@ import "./nav.js";
 import { api } from "./api.js";
 import { toast } from "./toast.js";
 import { makeSortable } from "./sortable.js";
-import { esc, escAttr, plural, resultsModal, outcomeOf, rowMenu, wireRowMenus, onDestCell, ON_DEST_HEADER } from "./ui.js";
+import { esc, escAttr, plural, resultsModal, outcomeOf, rowMenu, wireRowMenus, onDestCell, ON_DEST_HEADER, notesOf } from "./ui.js";
 
 const TABS = {
   "site-lists": { label: "site list", path: "site-lists", param: "siteListIds" },
@@ -242,7 +242,7 @@ function row(r) {
     outcome: outcomeOf(r),
     text: r.note ? `${r.sourceName} (${r.note})` : r.sourceName,
     error: r.error,
-    notes: r.adjustments,
+    notes: notesOf(r),
   };
 }
 

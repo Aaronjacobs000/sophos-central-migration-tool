@@ -41,7 +41,10 @@ exact commit SHA at the time of the copy.
   regional API host straight from `/whoami/v1`.
 - **`sophos-client.ts`**: `globalRequest()` skips the caller's identity
   header when the request sets its own `X-Tenant-ID` or `X-Distributor-ID`,
-  ported from upstream commit 89a43af. The Licensing API needs it.
+  ported from upstream commit 89a43af. The Licensing API needs it. Only GET
+  requests are retried after a 5xx, a timeout or a network error; a write
+  that ends that way throws `UnclearWriteError`, because Sophos can answer
+  500 and still make the change. A 429 still waits and resends any request.
 - **`sophos.ts` (types)** is a fork: removed `SophosTenant`,
   `SophosTenantPage`, and `SophosIdType` (unused after the resolver fork).
 

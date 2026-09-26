@@ -14,6 +14,7 @@
 
 import { requireContext } from "../state.js";
 import { auditOrWarn } from "./audit-log.js";
+import { createChecked } from "./write-check.js";
 import {
   listSiteLists,
   listSites,
@@ -43,6 +44,8 @@ export interface WebFilterCopyResult {
   adjustments?: string[];
   /** Extra detail for the results list, such as the number of sites. */
   note?: string;
+  /** Notes for the results list, such as a create Sophos answered unclearly but a read-back found. */
+  notes?: string[];
 }
 
 const nameKey = (name: string | undefined) => String(name ?? "").trim().toLowerCase();
@@ -99,7 +102,11 @@ export async function copyWebFilters(req: CopyWebFiltersRequest): Promise<WebFil
       continue;
     }
     try {
-      const created = await createSiteList(dst.client, dst.tenantId, body);
+      const { value: created, note: checked } = await createChecked(
+        () => createSiteList(dst.client, dst.tenantId, body),
+        async () => (await listSiteLists(dst.client, dst.tenantId)).find((l) => nameKey(l.name) === nameKey(list.name)),
+        "the site list",
+      );
       listMap.set(id, created.id);
       dstListByName.set(nameKey(list.name), created);
       await auditOrWarn({
@@ -109,9 +116,9 @@ export async function copyWebFilters(req: CopyWebFiltersRequest): Promise<WebFil
         resource: "web-filter-site-list",
         resourceId: created.id,
         ok: true,
-        detail: { sourceId: id, name: list.name, siteCount: sites.length },
+        detail: { sourceId: id, name: list.name, siteCount: sites.length, ...(checked ? { note: checked } : {}) },
       });
-      results.push({ kind: "site-list", sourceId: id, sourceName: list.name, destId: created.id, ok: true, action: "create", note: `${sites.length} site${sites.length === 1 ? "" : "s"}` });
+      results.push({ kind: "site-list", sourceId: id, sourceName: list.name, destId: created.id, ok: true, action: "create", note: `${sites.length} site${sites.length === 1 ? "" : "s"}`, ...(checked ? { notes: [checked] } : {}) });
     } catch (err) {
       const msg = errMsg(err);
       await auditOrWarn({
@@ -162,7 +169,11 @@ export async function copyWebFilters(req: CopyWebFiltersRequest): Promise<WebFil
       continue;
     }
     try {
-      const created = await createProfile(dst.client, dst.tenantId, body);
+      const { value: created, note: checked } = await createChecked(
+        () => createProfile(dst.client, dst.tenantId, body),
+        async () => (await listProfiles(dst.client, dst.tenantId)).find((p) => nameKey(p.name) === nameKey(profile.name)),
+        "the profile",
+      );
       dstProfileByName.set(nameKey(profile.name), created);
       await auditOrWarn({
         side: "dest",
@@ -171,9 +182,9 @@ export async function copyWebFilters(req: CopyWebFiltersRequest): Promise<WebFil
         resource: "web-filter-profile",
         resourceId: created.id,
         ok: true,
-        detail: { sourceId: id, name: profile.name, ...(adjustments.length ? { adjustments } : {}) },
+        detail: { sourceId: id, name: profile.name, ...(adjustments.length ? { adjustments } : {}), ...(checked ? { note: checked } : {}) },
       });
-      results.push({ kind: "profile", sourceId: id, sourceName: profile.name, destId: created.id, ok: true, action: "create", ...(adjustments.length ? { adjustments } : {}) });
+      results.push({ kind: "profile", sourceId: id, sourceName: profile.name, destId: created.id, ok: true, action: "create", ...(adjustments.length ? { adjustments } : {}), ...(checked ? { notes: [checked] } : {}) });
     } catch (err) {
       const msg = errMsg(err);
       await auditOrWarn({

@@ -4,7 +4,7 @@ import { toast } from "./toast.js";
 import { getCachedSection, refreshSection } from "./preload-client.js";
 import { makeSortable } from "./sortable.js";
 import { icon } from "./icons.js";
-import { rowMenu, wireRowMenus, stackBar, onDestCell, ON_DEST_HEADER, plural, resultsModal, outcomeOf, countOutcomes } from "./ui.js";
+import { rowMenu, wireRowMenus, stackBar, onDestCell, ON_DEST_HEADER, plural, resultsModal, outcomeOf, countOutcomes, notesOf } from "./ui.js";
 import { pairPolicy } from "./policy-pairing.js";
 
 // Friendly labels for known Sophos endpoint policy types. Anything not in
@@ -567,7 +567,7 @@ function reportClone(results) {
       outcome: outcomeOf(r),
       text: sourceById.get(r.sourceId)?.name ?? r.sourceName,
       error: r.error,
-      notes: r.adjustments,
+      notes: notesOf(r),
     });
   }
   resultsModal({

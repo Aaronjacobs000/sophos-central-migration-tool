@@ -11,6 +11,7 @@ import { getGroup, listGroups, createGroup } from "../sophos/api/groups.js";
 import { listUserGroups, createUserGroup } from "../sophos/api/user-groups.js";
 import { requireContext } from "../state.js";
 import { auditOrWarn } from "./audit-log.js";
+import { createChecked } from "./write-check.js";
 import type { SophosEndpointGroup } from "../sophos/types/migration.js";
 
 export interface MirrorGroupsRequest {
@@ -25,6 +26,8 @@ export interface MirrorGroupResult {
   ok: boolean;
   action: "create" | "skip-exists" | "dry-run-create";
   error?: string;
+  /** Notes for the results list, such as a create Sophos answered unclearly but a read-back found. */
+  notes?: string[];
 }
 
 export async function mirrorGroups(req: MirrorGroupsRequest): Promise<MirrorGroupResult[]> {
@@ -74,12 +77,17 @@ export async function mirrorGroups(req: MirrorGroupsRequest): Promise<MirrorGrou
       // The create API rejects an empty description with 400 "Validation
       // failure" (measured 25/09/2026), and GET returns "" for groups made
       // without one, so only send a description that has text.
-      const created = await createGroup(dst.client, dst.tenantId, {
-        name: sourceGroup.name,
-        ...(sourceGroup.description?.trim() ? { description: sourceGroup.description } : {}),
-        type: sourceGroup.type,
-        endpointType: sourceGroup.endpointType,
-      });
+      const name = sourceGroup.name.toLowerCase();
+      const { value: created, note } = await createChecked(
+        () => createGroup(dst.client, dst.tenantId, {
+          name: sourceGroup.name,
+          ...(sourceGroup.description?.trim() ? { description: sourceGroup.description } : {}),
+          type: sourceGroup.type,
+          endpointType: sourceGroup.endpointType,
+        }),
+        async () => (await listGroups(dst.client, dst.tenantId)).find((g) => g.name.toLowerCase() === name),
+        "the group",
+      );
       await auditOrWarn({
         side: "dest",
         tenantId: dst.tenantId,
@@ -87,7 +95,7 @@ export async function mirrorGroups(req: MirrorGroupsRequest): Promise<MirrorGrou
         resource: "endpoint-group",
         resourceId: created.id,
         ok: true,
-        detail: { sourceId, name: sourceGroup.name },
+        detail: { sourceId, name: sourceGroup.name, ...(note ? { note } : {}) },
       });
       results.push({
         sourceId,
@@ -95,6 +103,7 @@ export async function mirrorGroups(req: MirrorGroupsRequest): Promise<MirrorGrou
         destId: created.id,
         ok: true,
         action: "create",
+        ...(note ? { notes: [note] } : {}),
       });
     } catch (err) {
       const msg = errMsg(err);
@@ -157,8 +166,13 @@ export async function mirrorUserGroups(req: MirrorUserGroupsRequest): Promise<Mi
     }
     const body = { name: group.name, ...(group.description?.trim() ? { description: group.description } : {}) };
     try {
-      const created = await createUserGroup(dst.client, dst.tenantId, body);
-      destNames.add(group.name.toLowerCase());
+      const name = group.name.toLowerCase();
+      const { value: created, note } = await createChecked(
+        () => createUserGroup(dst.client, dst.tenantId, body),
+        async () => (await listUserGroups(dst.client, dst.tenantId)).find((g) => g.name.toLowerCase() === name),
+        "the user group",
+      );
+      destNames.add(name);
       await auditOrWarn({
         side: "dest",
         tenantId: dst.tenantId,
@@ -166,9 +180,9 @@ export async function mirrorUserGroups(req: MirrorUserGroupsRequest): Promise<Mi
         resource: "user-group",
         resourceId: created.id,
         ok: true,
-        detail: { sourceId, name: group.name },
+        detail: { sourceId, name: group.name, ...(note ? { note } : {}) },
       });
-      results.push({ sourceId, sourceName: group.name, destId: created.id, ok: true, action: "create" });
+      results.push({ sourceId, sourceName: group.name, destId: created.id, ok: true, action: "create", ...(note ? { notes: [note] } : {}) });
     } catch (err) {
       const msg = errMsg(err);
       await auditOrWarn({

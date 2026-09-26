@@ -86,6 +86,7 @@ The Migrations page, a job's monitor, and the same monitor in wall view:
 - The dashboard shows the route, a four-step checklist (connect, configuration, devices, verify) with live counts, and the preload state of each data section with a refresh button per tenant.
 - Ctrl K opens a palette for going to any page or finding a device by hostname.
 - The Logs page shows the last 500 server log lines with filters. Copies, clones, deletes and migrations are also written to `data/audit.log`.
+- Only reads are retried. A read that fails with a server error, a timeout or a dropped connection is tried twice more. A write is sent once, because Sophos can answer 500 and still make the change, so sending it again could make a duplicate. When a create, an addition to a group or the start of a device move gets no clear answer, the tool reads the tenant back for about 10 seconds: if the change is there, it is reported done with a note; if not, it is reported failed with a warning that the change may still have gone through, so check the destination before trying again. Other writes that get no clear answer carry the same warning. A request Sophos turns away with 429 (too many requests) waits and is sent again, because Sophos did not act on it.
 
 ## Prerequisites
 
@@ -146,7 +147,7 @@ backend/
       tenant-context.ts          # Direct and partner tenant contexts
       auth/token-manager.ts      # OAuth2 client credentials and refresh (from sophos-mcp)
       client/
-        sophos-client.ts         # HTTP client with retry, rate limits, region routing (from sophos-mcp)
+        sophos-client.ts         # HTTP client with read retries, rate limits, region routing (from sophos-mcp)
         tenant-resolver.ts       # /whoami, tenant list, regional host cache (from sophos-mcp)
       types/                     # API response types
       api/                       # One wrapper per API: policies, groups, exclusions,
@@ -203,7 +204,7 @@ data/                            # Created at run time, not committed
 
 ## Credits
 
-The core Sophos API client code (OAuth2 token manager, HTTP client with retry and rate limiting, tenant resolver with regional routing) is vendored from [sophos-mcp](https://github.com/Aaronjacobs000/sophos-mcp) (formerly sophos-central-mcp, MIT License). The Inter and Geist Mono fonts are bundled under the SIL Open Font License. See [ATTRIBUTIONS.md](ATTRIBUTIONS.md).
+The core Sophos API client code (OAuth2 token manager, HTTP client with read retries and rate limiting, tenant resolver with regional routing) is vendored from [sophos-mcp](https://github.com/Aaronjacobs000/sophos-mcp) (formerly sophos-central-mcp, MIT License). The Inter and Geist Mono fonts are bundled under the SIL Open Font License. See [ATTRIBUTIONS.md](ATTRIBUTIONS.md).
 
 ## License
 

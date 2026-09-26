@@ -34,6 +34,7 @@ import { listProfiles } from "../sophos/api/web-filters.js";
 import { listRuntimeDetectionProfiles } from "../sophos/api/runtime-detection.js";
 import { requireContext } from "../state.js";
 import { auditOrWarn } from "./audit-log.js";
+import { createChecked, isUnclearWrite } from "./write-check.js";
 import { pairPolicy } from "../compare/policy-pairing.js";
 import type { SophosPolicy } from "../sophos/types/migration.js";
 
@@ -58,6 +59,8 @@ export interface MigratePolicyResult {
    * exist there, or settings the destination API refused to accept).
    */
   adjustments?: string[];
+  /** Notes for the results list, such as a create Sophos answered unclearly but a read-back found. */
+  notes?: string[];
 }
 
 export async function migratePolicies(
@@ -72,6 +75,7 @@ export async function migratePolicies(
     listPolicies(src.client, src.tenantId),
     listPolicies(dst.client, dst.tenantId),
   ]);
+  const destIds = new Set(destExisting.map((p) => p.id));
 
   // Website tags available in the destination (from its local-site list),
   // fetched at most once per run. Web-control policies reference these tags by
@@ -238,21 +242,31 @@ export async function migratePolicies(
 
     try {
       let result: SophosPolicy;
+      let note: string | undefined;
       // The write API rejects some settings the GET happily returns. When the
       // error names the offending settings ("… for setting (X)"), drop just
       // those settings and retry so they don't sink the policy. One error can
       // name many settings (ten web control file types that read back as
       // "inherit", measured 25/09/2026), so every named setting is dropped at
-      // once. Every drop is recorded in `adjustments`.
+      // once. Every drop is recorded in `adjustments`. Only a clear refusal is
+      // sent again: after an unclear answer the policy may have been written.
+      // A create Sophos answered unclearly is read back by name (write-check.ts).
       for (let attempt = 0; ; attempt++) {
         try {
-          result = match
-            ? await updatePolicy(dst.client, dst.tenantId, match.id, body)
-            : await createPolicy(dst.client, dst.tenantId, body);
+          if (match) {
+            result = await updatePolicy(dst.client, dst.tenantId, match.id, body);
+          } else {
+            ({ value: result, note } = await createChecked(
+              () => createPolicy(dst.client, dst.tenantId, body),
+              async () => (await listPolicies(dst.client, dst.tenantId))
+                .find((p) => p.type === body.type && p.name === body.name && !destIds.has(p.id)),
+              "the policy",
+            ));
+          }
           break;
         } catch (err) {
           const msg = errMsg(err);
-          const named = rejectedSettings(msg).filter(
+          const named = isUnclearWrite(err) ? [] : rejectedSettings(msg).filter(
             ({ key }) => body.settings !== undefined && key in body.settings,
           );
           if (attempt < MAX_SETTING_RETRIES && named.length > 0) {
@@ -277,6 +291,7 @@ export async function migratePolicies(
           name: sourcePolicy.name,
           type: sourcePolicy.type,
           ...(adjustments.length ? { adjustments } : {}),
+          ...(note ? { note } : {}),
         },
       });
       results[i] = {
@@ -287,6 +302,7 @@ export async function migratePolicies(
         ok: true,
         action: match ? "overwrite" : "create",
         adjustments: adjustments.length ? adjustments : undefined,
+        ...(note ? { notes: [note] } : {}),
       };
     } catch (err) {
       const msg = errMsg(err);

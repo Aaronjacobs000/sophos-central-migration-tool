@@ -3,7 +3,7 @@ import { api } from "./api.js";
 import { toast } from "./toast.js";
 import { getCachedSection, refreshSection } from "./preload-client.js";
 import { makeSortable } from "./sortable.js";
-import { rowMenu, wireRowMenus, plural, resultsModal, outcomeOf, countOutcomes, onDestCell, ON_DEST_HEADER } from "./ui.js";
+import { rowMenu, wireRowMenus, plural, resultsModal, outcomeOf, countOutcomes, onDestCell, ON_DEST_HEADER, notesOf } from "./ui.js";
 
 // The first three types come from the preload cache and can be deleted on
 // the destination. The rest are read on demand and are copy only.
@@ -399,6 +399,7 @@ function showResults(results, dryRun) {
         outcome: outcomeOf(r),
         text: describe(t.id, r.sourceId),
         error: r.error,
+        notes: notesOf(r),
       })),
     })),
   });

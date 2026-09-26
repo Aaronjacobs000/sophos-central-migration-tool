@@ -33,6 +33,7 @@ import {
   type LocalMigrationJob,
 } from "./migration-store.js";
 import { auditOrWarn, auditedDelete } from "./audit-log.js";
+import { foundNote, isUnclearWrite, notFound, readBack } from "./write-check.js";
 import { checkMigrationWindow } from "./migration-window.js";
 import { refreshCheckIns } from "./device-check-in.js";
 import { jobProgress } from "./job-progress.js";
@@ -53,6 +54,9 @@ import type { SophosMigrationJob } from "../sophos/types/migration.js";
 import type { JobCredentialRefs, JobMonitor } from "./migration-store.js";
 
 const FOURTEEN_DAYS_MS = 14 * 24 * 60 * 60 * 1000;
+
+/** Added to an unclear answer during a start: where to look before starting again. */
+const JOBS_PAGE_NOTE = "The Migrations page lists the jobs on both tenants, including ones this tool did not save.";
 
 export type MigrationDirection = "source-to-dest" | "dest-to-source";
 
@@ -205,7 +209,9 @@ export async function startMigration(
   let receiver: Awaited<ReturnType<typeof createReceiverJob>>;
   try {
     receiver = await createReceiverJob(to.client, to.tenantId, receiverBody);
-  } catch (err) {
+  } catch (caught) {
+    // Without the handshake token an unclear receiving job can't be used, so it is reported, not read back.
+    const err = isUnclearWrite(caught) ? new Error(`${caught.message} ${JOBS_PAGE_NOTE}`, { cause: caught }) : caught;
     await auditOrWarn({
       side: to.label,
       tenantId: to.tenantId,
@@ -247,8 +253,23 @@ export async function startMigration(
     detail: { jobId: receiver.id, endpointCount: endpointIds.length },
   });
   let sender;
+  let senderNote: string | undefined;
   try {
-    sender = await triggerSenderJob(from.client, from.tenantId, receiver.id, senderBody);
+    try {
+      sender = await triggerSenderJob(from.client, from.tenantId, receiver.id, senderBody);
+    } catch (err) {
+      if (!isUnclearWrite(err)) throw err;
+      // Sophos gave no clear answer. The sending tenant knows the job only
+      // once the trigger has gone through, so read the job back there.
+      const found = await readBack(async () => {
+        const job = await getMigrationJob(from.client, from.tenantId, receiver.id);
+        return /receiv/i.test(String(job.mode ?? job.type ?? "")) ? undefined : job;
+      });
+      if (!found) throw new Error(`${notFound(err).message} ${JOBS_PAGE_NOTE}`, { cause: err });
+      sender = found;
+      senderNote = foundNote(err, "the move on the sending tenant");
+      log.emit("warn", "migration", `Sender trigger: ${senderNote}.`, { side: from.label as "source" | "dest" });
+    }
     log.emit("info", "migration", `Sender triggered: id=${sender.id}, mode=${(sender as any).mode}`, {
       side: from.label as "source" | "dest",
       detail: { response: sender },
@@ -265,6 +286,7 @@ export async function startMigration(
         direction,
         endpointCount: acceptedEndpoints.length,
         receiverId: receiver.id,
+        ...(senderNote ? { note: senderNote } : {}),
       },
     });
   } catch (err) {
@@ -280,8 +302,11 @@ export async function startMigration(
         detail: { jobName: req.jobName, direction, receiverId: receiver.id },
       });
     }
-    // Best effort, and audited like any other delete.
-    await auditedDelete(to, "migration-receiver", receiver.id, () => deleteMigrationJob(to.client, to.tenantId, receiver.id)).catch(() => {});
+    // Best effort, and audited like any other delete. An unclear trigger may
+    // have started the move, so its receiving job is left alone.
+    if (!isUnclearWrite((err as Error).cause ?? err)) {
+      await auditedDelete(to, "migration-receiver", receiver.id, () => deleteMigrationJob(to.client, to.tenantId, receiver.id)).catch(() => {});
+    }
     throw err;
   }
 

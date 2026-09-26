@@ -159,6 +159,39 @@ test("errors: devices the API reports, and a group synced from Active Directory"
   assert.ok(entries.every((e) => e.ok === false));
 });
 
+test("an addition Sophos answers with 500 is sent once, and a read-back that finds the device counts it added", async () => {
+  const { setReadBackDelays } = await import("../backend/dist/services/write-check.js");
+  setReadBackDelays([0, 0, 0]);
+  seedMoved();
+  // Sophos makes the change and still answers 500, as seen live on 26/09/2026.
+  addBehaviour = (groupId, ids) => {
+    destMembers[groupId] = [...(destMembers[groupId] ?? []), ...ids];
+    return { status: 500, body: { error: "InternalError", message: "Error processing data" } };
+  };
+  await writeJobs([baseJob()]);
+  fake.reset();
+  const before = (await readAudit(root)).length;
+  const res = await restoreGroupMembership("local-1");
+  const r1 = res.rows.find((r) => r.endpointId === uuid(1));
+  assert.equal(r1.status, "added");
+  assert.match(r1.message, /^Sophos answered 500, but a read-back found the device in the group on the destination/);
+  assert.equal(fake.writes().length, 1, "never sent twice");
+  const entries = (await readAudit(root)).slice(before);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].ok, true);
+  assert.match(entries[0].detail.note, /read-back found/);
+
+  // Not there on any read-back: failed, with the warning to check first.
+  seedMoved();
+  addBehaviour = () => ({ status: 500, body: { error: "InternalError" } });
+  fake.reset();
+  const again = await restoreGroupMembership("local-1");
+  const r1b = again.rows.find((r) => r.endpointId === uuid(1));
+  assert.equal(r1b.status, "error");
+  assert.match(r1b.message, /A read-back did not find it yet\. The change may still have gone through: check the destination before trying again\./);
+  assert.equal(fake.writes().length, 1);
+});
+
 test("older jobs without a snapshot read the device's group on the sending tenant", async () => {
   seedMoved();
   const job = baseJob();

@@ -20,10 +20,11 @@
  */
 
 import { auditOrWarn } from "./audit-log.js";
+import { isUnclearWrite, readBack, foundNote, notFound } from "./write-check.js";
 import { verifiedContextsForJob } from "./job-access.js";
 import { getJob, type EndpointGroupRef } from "./migration-store.js";
 import { listMigrationEndpointStatuses, type MigrationEndpointStatus } from "../sophos/api/migrations.js";
-import { listAllGroups, listGroupEndpointIds, addEndpointsToGroup } from "../sophos/api/groups.js";
+import { listAllGroups, listGroupEndpointIds, addEndpointsToGroup, type AddToGroupResponse } from "../sophos/api/groups.js";
 import { getEndpoint } from "../sophos/api/endpoints.js";
 import type { TenantLabel } from "../sophos/tenant-context.js";
 import type { SophosEndpoint } from "../sophos/types/sophos.js";
@@ -185,11 +186,35 @@ export async function restoreGroupMembership(
     for (const g of groups) {
       const addedIds = new Set<string>();
       const problems = new Map<string, string>();
+      // Devices a read-back found in the group after an unclear answer, with the note that says so.
+      const readBackNotes = new Map<string, string>();
       let failure: string | undefined;
       for (let i = 0; i < g.ids.length; i += ADD_BATCH) {
         const batch = g.ids.slice(i, i + ADD_BATCH);
         try {
-          const res = await addEndpointsToGroup(to.client, to.tenantId, g.destGroupId, batch);
+          let res: AddToGroupResponse;
+          let note: string | undefined;
+          try {
+            res = await addEndpointsToGroup(to.client, to.tenantId, g.destGroupId, batch);
+          } catch (err) {
+            if (!isUnclearWrite(err)) throw err;
+            // Sophos gave no clear answer: read the group back and count who is in it.
+            const inGroup = async () => {
+              const members = new Set(await listGroupEndpointIds(to.client, to.tenantId, g.destGroupId));
+              return batch.filter((id) => members.has(id));
+            };
+            let found = await readBack(async () => {
+              const got = await inGroup();
+              return got.length === batch.length ? got : undefined;
+            });
+            if (!found) found = await inGroup().catch(() => []);
+            if (!found.length) throw notFound(err);
+            note = foundNote(err, found.length === 1 ? "the device in the group" : "the devices in the group");
+            const unclear = notFound(err).message;
+            for (const id of batch) if (!found.includes(id)) problems.set(id, unclear);
+            for (const id of found) readBackNotes.set(id, note);
+            res = { addedEndpoints: found.map((id) => ({ id })) };
+          }
           for (const e of res.addedEndpoints ?? []) addedIds.add(e.id);
           for (const id of res.errors?.endpointsNotFound ?? []) problems.set(id, "the destination did not find this device");
           for (const id of res.errors?.endpointsOfWrongType ?? []) problems.set(id, "the device type does not match the group type");
@@ -202,7 +227,7 @@ export async function restoreGroupMembership(
             resource: "endpoint-group-membership",
             resourceId: g.destGroupId,
             ok: problems.size === 0,
-            detail: { localJobId, group: g.name, ids: batch, added: [...addedIds], errors: res.errors ?? null },
+            detail: { localJobId, group: g.name, ids: batch, added: [...addedIds], errors: res.errors ?? null, ...(note ? { note } : {}) },
             ...(problems.size ? { error: `${problems.size} device(s) not added` } : {}),
           });
         } catch (err) {
@@ -224,8 +249,11 @@ export async function restoreGroupMembership(
       if (failure) g.error = failure;
       for (const r of rows) {
         if (r.destGroupId !== g.destGroupId || r.status !== "will-add" || !r.newId) continue;
-        if (addedIds.has(r.newId)) r.status = "added";
-        else {
+        if (addedIds.has(r.newId)) {
+          r.status = "added";
+          const note = readBackNotes.get(r.newId);
+          if (note) r.message = note;
+        } else {
           r.status = "error";
           r.message = problems.get(r.newId) ?? "the destination did not confirm the addition";
         }

@@ -115,6 +115,11 @@ export function outcomeOf(r) {
   return "created";
 }
 
+/** A result's notes for the results list: settings changed to fit, then anything else the copy noted. */
+export function notesOf(r) {
+  return [...(r.adjustments ?? []), ...(r.notes ?? [])];
+}
+
 /** How many results have each outcome, counted the way the results list tags them. */
 export function countOutcomes(results) {
   const n = { created: 0, "would-create": 0, skipped: 0, failed: 0 };

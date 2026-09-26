@@ -61,7 +61,7 @@ test("policies: both clone buttons show the results list", async () => {
   assert.match(report, /const n = countOutcomes\(results\);/);
   assert.match(report, /toast\(`Cloned \$\{n\.created\} \/ failed \$\{n\.failed\}/);
   assert.match(report, /outcome: outcomeOf\(r\)/);
-  assert.match(report, /notes: r\.adjustments/);
+  assert.match(report, /notes: notesOf\(r\)/);
   assert.match(report, /plural\(n\.created, "policy", "policies"\)/);
 });
 
@@ -79,7 +79,7 @@ test("policy Compare: an overwrite or clone shows the results list, which stays 
   const list = js.slice(js.indexOf("function showResults"));
   assert.match(list, /outcome: r\.ok && r\.action === "overwrite" \? "updated" : outcomeOf\(r\)/);
   assert.match(list, /error: r\.error/);
-  assert.match(list, /notes: r\.adjustments/);
+  assert.match(list, /notes: notesOf\(r\)/);
   assert.match(list, /resultsModal\(\{/);
   const ui = await readFile(new URL("../frontend/js/ui.js", import.meta.url), "utf8");
   assert.match(ui, /updated: `<span class="tag tag-ok">updated<\/span>`/);
