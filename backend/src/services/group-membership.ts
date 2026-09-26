@@ -15,11 +15,12 @@
  * Group assignments carry policy with them, so a policy assigned to a group
  * follows the device. Groups synced from Active Directory refuse API writes
  * (HTTP 409); that is reported per group. Supports dry run, and every write
- * is audited.
+ * is audited. The job's own tenants and stored credentials are used
+ * (job-access.ts), so this never writes to whatever pair the tool points at now.
  */
 
-import { requireContext } from "../state.js";
 import { audit } from "./audit-log.js";
+import { verifiedContextsForJob } from "./job-access.js";
 import { getJob, type EndpointGroupRef } from "./migration-store.js";
 import { listMigrationEndpointStatuses, type MigrationEndpointStatus } from "../sophos/api/migrations.js";
 import { listAllGroups, listGroupEndpointIds, addEndpointsToGroup } from "../sophos/api/groups.js";
@@ -80,8 +81,10 @@ export async function restoreGroupMembership(
 
   const sendingSide: TenantLabel = job.direction === "dest-to-source" ? "dest" : "source";
   const receivingSide: TenantLabel = sendingSide === "source" ? "dest" : "source";
-  const from = requireContext(sendingSide);
-  const to = requireContext(receivingSide);
+  // The job's own tenants, whatever the tool points at now.
+  const contexts = await verifiedContextsForJob(job);
+  const from = contexts[sendingSide];
+  const to = contexts[receivingSide];
 
   // 1. New IDs. The receiving side is asked first; the sending side fills gaps.
   const statusById = new Map<string, MigrationEndpointStatus>();

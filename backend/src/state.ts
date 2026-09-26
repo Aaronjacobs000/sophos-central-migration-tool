@@ -330,6 +330,35 @@ export function getPartnerContext(): PartnerContext | null {
   return state?.partner ?? null;
 }
 
+/**
+ * The credentials behind the live source and dest contexts, for storing with
+ * a migration job. Only called server-side; never returned by a route.
+ */
+export type CurrentCredentials =
+  | { mode: "direct"; source: { clientId: string; clientSecret: string }; dest: { clientId: string; clientSecret: string } }
+  | { mode: "partner"; partner: { clientId: string; clientSecret: string } };
+
+export function currentCredentials(): CurrentCredentials | null {
+  if (!state?.source || !state.dest) return null;
+  if (state.mode === "partner") {
+    const p = extractPartnerCredentials(state.envFile);
+    return p ? { mode: "partner", partner: { clientId: p.clientId, clientSecret: p.clientSecret } } : null;
+  }
+  const s = extractDirectCredentials(state.envFile, "source");
+  const d = extractDirectCredentials(state.envFile, "dest");
+  if (!s || !d) return null;
+  return {
+    mode: "direct",
+    source: { clientId: s.clientId, clientSecret: s.clientSecret },
+    dest: { clientId: d.clientId, clientSecret: d.clientSecret },
+  };
+}
+
+/** The live contexts, or null for a side that is not connected. */
+export function currentContexts(): { source: TenantContext | null; dest: TenantContext | null } {
+  return { source: state?.source ?? null, dest: state?.dest ?? null };
+}
+
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }

@@ -40,6 +40,66 @@ export interface DeviceCheckIn {
   checkedInAt?: string;
 }
 
+/**
+ * A tenant a job ran against, recorded when the job is created (or when
+ * credentials are attached to an older job), so the job keeps checking the
+ * same tenants after the tool is pointed at another pair.
+ */
+export interface JobTenant {
+  tenantId: string;
+  /** Display name at the time: the label, or the tenant name in partner mode. */
+  name: string | null;
+  /** Regional data host, for example https://api-eu02.central.sophos.com. */
+  apiHost: string;
+  region: string | null;
+}
+
+/**
+ * References into the encrypted job credential store (job-credentials.ts).
+ * No secret is kept in the job itself. In partner mode both sides refer to
+ * the same partner credential.
+ */
+export interface JobCredentialRefs {
+  mode: "direct" | "partner";
+  source: string;
+  dest: string;
+  storedAt: string;
+}
+
+/**
+ * How the last check of a job went. A failed check never replaces the saved
+ * snapshots or check-ins; it only changes this.
+ */
+export interface JobMonitor {
+  /**
+   * ok: both tenants answered. rejected: Sophos refused the credentials
+   * (deleted, rotated or no longer allowed). no-credentials: nothing to check
+   * with. not-found: an older job with no recorded tenants was not found on the
+   * tenants the tool points at. error: any other failure, retried.
+   */
+  state: "ok" | "rejected" | "no-credentials" | "not-found" | "error";
+  /** Where the credentials for the last check came from. */
+  via?: "stored" | "current";
+  message?: string;
+  /** Last check that reached both tenants. */
+  lastOkAt?: string;
+  lastTriedAt?: string;
+}
+
+/**
+ * Job status, from the devices: requested once Sophos has accepted the job,
+ * in-progress once one device has checked in on the receiving tenant,
+ * completed once all have. A job where every device has arrived or failed
+ * ends completed-with-failures (some arrived) or failed (none did).
+ */
+export type JobStatus =
+  | "requested"
+  | "in-progress"
+  | "completed"
+  | "completed-with-failures"
+  | "failed"
+  | "cancelled";
+
 export interface LocalMigrationJob {
   localJobId: string;
   jobName: string;
@@ -57,9 +117,19 @@ export interface LocalMigrationJob {
   endpointGroups?: Record<string, EndpointGroupRef | null>;
   /** Check-in on the receiving tenant, by the device's ID on the sending tenant. */
   checkIns?: Record<string, DeviceCheckIn>;
-  status: "in-progress" | "complete" | "failed" | "partially-complete" | "cancelled";
+  /**
+   * Derived from the devices on every check (job-progress.ts). Jobs saved by
+   * earlier versions may hold "complete", "in-progress" or "partially-complete",
+   * which meant the handover only; they are recomputed when read.
+   */
+  status: JobStatus | "complete" | "partially-complete";
   sourceSnapshot: SophosMigrationJob | null;
   destSnapshot: SophosMigrationJob | null;
+  /** The tenants the job ran against. Absent on jobs created by earlier builds. */
+  tenants?: { source: JobTenant; dest: JobTenant };
+  /** Stored credentials for checking the job later. Absent when none are stored. */
+  credentials?: JobCredentialRefs;
+  monitor?: JobMonitor;
   lastPolledAt?: string;
   lastError?: string;
 }
@@ -145,7 +215,7 @@ export async function createJob(
   const job: LocalMigrationJob = withoutTokens({
     localJobId: randomUUID(),
     createdAt: new Date().toISOString(),
-    status: "in-progress",
+    status: "requested",
     sourceSnapshot: null,
     destSnapshot: null,
     ...init,

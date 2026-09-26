@@ -12,6 +12,8 @@ export async function bootApp(fake) {
   for (const k of ["log", "warn", "error"]) console[k] = () => {};
 
   const root = await mkdtemp(path.join(tmpdir(), "stmt-test-"));
+  // Job credentials are encrypted with a key kept outside the repo; keep the tests' key in the temp root.
+  process.env.JOB_CREDENTIALS_KEY_FILE = path.join(root, "key", "job-credentials.key");
   await writeFile(
     path.join(root, ".env"),
     [

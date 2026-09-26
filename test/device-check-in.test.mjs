@@ -81,7 +81,7 @@ test("the job stays open, waiting for check-in, after the API reports the handov
   destRecords = [stale, registered];
   fake.reset();
   const job = await pollJob("local-1");
-  assert.equal(job.status, "complete", "the API status is unchanged");
+  assert.equal(job.status, "requested", "handed over is not arrived: the job stays requested until a device checks in");
   assert.deepEqual(job.checkIns[OLD], { state: "waiting", newId: NEW, handedOverAt: at(0.1) });
   assert.equal(awaitingCheckIn(job), true, "the live stream keeps polling");
   const [lookup] = endpointLookups();
@@ -106,6 +106,9 @@ test("the check-in is recorded once, with its time and the new ID, and not looke
 
 test("a move back reads the source tenant, which is then the receiving side", async () => {
   await seedJob({ direction: "dest-to-source" });
+  // On a move back DST is the sending side and SRC the receiving one.
+  fake.on(SRC, "GET", /^\/endpoint\/v1\/migrations\/job-1$/, () => ({ body: { id: "job-1", mode: "receiving" } }));
+  fake.on(DST, "GET", /^\/endpoint\/v1\/migrations\/job-1$/, () => ({ body: { id: "job-1", mode: "sending" } }));
   // Receiving is now SRC: it returns newId, DST (sending) does not.
   fake.on(SRC, "GET", /^\/endpoint\/v1\/migrations\/job-1\/endpoints$/, (req) => page(jobEndpoints, req.query));
   fake.on(DST, "GET", /^\/endpoint\/v1\/migrations\/job-1\/endpoints$/, (req) => page(jobEndpoints.map(({ newId, ...rest }) => rest), req.query));

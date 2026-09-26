@@ -3,10 +3,17 @@
  *   POST   /api/migrate/devices                          start a job
  *   GET    /api/migrate/devices/jobs                     list local jobs
  *   GET    /api/migrate/devices/jobs/all                 merged local + API jobs
- *   GET    /api/migrate/devices/jobs/:id                 single job detail
+ *   GET    /api/migrate/devices/jobs/:id                 single job detail (checks it first)
  *   GET    /api/migrate/devices/jobs/:id/stream          SSE live updates
+ *   POST   /api/migrate/devices/jobs/:id/credentials     attach credentials to a job
+ *   POST   /api/migrate/devices/jobs/:id/credentials/remove  remove them
  *   POST   /api/migrate/devices/jobs/:id/group-membership  put moved devices
  *          back into same-named groups (dryRun supported)
+ *
+ * Jobs are checked with their own tenants and stored credentials
+ * (services/job-access.ts), so only starting a job needs the tool's current
+ * connection. Every job leaves through publicJob, which drops the credential
+ * references.
  */
 
 import { Router } from "express";
@@ -16,18 +23,35 @@ import {
   pollJob,
 } from "../services/device-migrator.js";
 import { listJobs, getJob } from "../services/migration-store.js";
-import { awaitingCheckIn } from "../services/device-check-in.js";
 import { restoreGroupMembership, JobNotFoundError } from "../services/group-membership.js";
+import { attachCredentials, removeCredentials, AttachError, JobAccessError } from "../services/job-access.js";
+import { nextCheckDelayMs } from "../services/job-progress.js";
+import { publicJob, type PublicJob } from "../services/job-view.js";
 import { listMigrationJobs } from "../sophos/api/migrations.js";
-import { requireContext } from "../state.js";
+import { currentContexts } from "../state.js";
+import { maskSecrets } from "../log.js";
 import type { SophosMigrationJob } from "../sophos/types/migration.js";
 import type { LocalMigrationJob } from "../services/migration-store.js";
 
 export const migrateDevicesRouter = Router();
 
-migrateDevicesRouter.use("/migrate/devices", requireConfigured);
+/** Least time between background checks a list request can start for one job. */
+const LIST_REFRESH_MS = 30_000;
 
-migrateDevicesRouter.post("/migrate/devices", async (req, res, next) => {
+/**
+ * Start checks for unfinished jobs without holding up the list. The Migrations
+ * page refreshes itself, so it shows the results on its next load.
+ */
+function refreshInBackground(jobs: LocalMigrationJob[]): void {
+  for (const job of jobs) {
+    const view = publicJob(job);
+    const delay = nextCheckDelayMs(job, view.progress);
+    if (delay === null) continue;
+    pollJob(job.localJobId, { minAgeMs: Math.max(delay, LIST_REFRESH_MS) }).catch(() => {});
+  }
+}
+
+migrateDevicesRouter.post("/migrate/devices", requireConfigured, async (req, res, next) => {
   try {
     const ids = Array.isArray(req.body?.endpointIds) ? req.body.endpointIds : [];
     const jobName = String(req.body?.jobName ?? "").trim();
@@ -61,7 +85,7 @@ migrateDevicesRouter.post("/migrate/devices", async (req, res, next) => {
       res.json({ ok: true, dryRun: true, plan: result.plan });
       return;
     }
-    res.status(201).json({ ok: true, job: result.job });
+    res.status(201).json({ ok: true, job: result.job ? publicJob(result.job) : undefined });
   } catch (err) {
     next(err);
   }
@@ -70,7 +94,8 @@ migrateDevicesRouter.post("/migrate/devices", async (req, res, next) => {
 migrateDevicesRouter.get("/migrate/devices/jobs", async (_req, res, next) => {
   try {
     const jobs = await listJobs();
-    res.json({ items: jobs });
+    refreshInBackground(jobs);
+    res.json({ items: jobs.map((j) => publicJob(j)) });
   } catch (err) {
     next(err);
   }
@@ -83,14 +108,16 @@ migrateDevicesRouter.get("/migrate/devices/jobs", async (_req, res, next) => {
  */
 migrateDevicesRouter.get("/migrate/devices/jobs/all", async (_req, res, next) => {
   try {
-    const src = requireContext("source");
-    const dst = requireContext("dest");
+    // Jobs started elsewhere are read from the tenants the tool points at now.
+    const { source: src, dest: dst } = currentContexts();
+    const none = async (): Promise<SophosMigrationJob[]> => [];
 
     const [localJobs, srcApiJobs, dstApiJobs] = await Promise.all([
       listJobs(),
-      listMigrationJobs(src.client, src.tenantId).catch((): SophosMigrationJob[] => []),
-      listMigrationJobs(dst.client, dst.tenantId).catch((): SophosMigrationJob[] => []),
+      src ? listMigrationJobs(src.client, src.tenantId).catch(none) : none(),
+      dst ? listMigrationJobs(dst.client, dst.tenantId).catch(none) : none(),
     ]);
+    refreshInBackground(localJobs);
 
     // Index local jobs by their upstream Sophos migration IDs for correlation
     const localBySourceId = new Map<string, LocalMigrationJob>();
@@ -108,19 +135,22 @@ migrateDevicesRouter.get("/migrate/devices/jobs/all", async (_req, res, next) =>
     for (const lj of localJobs) {
       coveredApiIds.add(lj.sourceMigrationId);
       coveredApiIds.add(lj.destMigrationId);
+      const view = publicJob(lj);
       merged.push({
         origin: "local",
         localJobId: lj.localJobId,
         jobName: lj.jobName,
-        status: lj.status,
+        status: view.status,
         direction: lj.direction,
         endpointCount: lj.endpointIds.length,
         createdAt: lj.createdAt,
         sourceMigrationId: lj.sourceMigrationId,
         destMigrationId: lj.destMigrationId,
-        sourceSnapshot: lj.sourceSnapshot,
-        destSnapshot: lj.destSnapshot,
         lastPolledAt: lj.lastPolledAt,
+        progress: view.progress,
+        tenants: view.tenants,
+        monitor: view.monitor,
+        credentials: view.credentials,
       });
     }
 
@@ -128,20 +158,20 @@ migrateDevicesRouter.get("/migrate/devices/jobs/all", async (_req, res, next) =>
     for (const aj of srcApiJobs) {
       if (coveredApiIds.has(aj.id)) continue;
       coveredApiIds.add(aj.id);
-      merged.push(apiJobToMerged(aj, "source", src.summary.displayName));
+      merged.push(apiJobToMerged(aj, "source", src?.summary.displayName));
     }
 
     // 3. Add API-only jobs from the dest tenant
     for (const aj of dstApiJobs) {
       if (coveredApiIds.has(aj.id)) continue;
       coveredApiIds.add(aj.id);
-      merged.push(apiJobToMerged(aj, "dest", dst.summary.displayName));
+      merged.push(apiJobToMerged(aj, "dest", dst?.summary.displayName));
     }
 
     // Sort newest first
     merged.sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
 
-    res.json({ items: merged });
+    res.json({ items: merged, checkedAt: new Date().toISOString() });
   } catch (err) {
     next(err);
   }
@@ -154,9 +184,51 @@ migrateDevicesRouter.get("/migrate/devices/jobs/:id", async (req, res, next) => 
       res.status(404).json({ error: "not_found" });
       return;
     }
-    // Refresh once on detail load so the cached snapshot is up-to-date.
+    // Check once on detail load so the saved state is up to date. A failed
+    // check is recorded on the job and never replaces what was saved.
     const updated = await pollJob(req.params.id!).catch(() => job);
-    res.json(updated ?? job);
+    res.json(publicJob(updated ?? job));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Attach credentials to a job: { use: "current" } for the tool's current
+ * connection, or { use: "direct", sending: {clientId, clientSecret},
+ * receiving: {...} }. They are checked against the job's tenants (two GETs)
+ * before anything is stored. The response never carries them back.
+ */
+migrateDevicesRouter.post("/migrate/devices/jobs/:id/credentials", jsonOnly, async (req, res, next) => {
+  try {
+    const body = req.body ?? {};
+    if (body.use !== "direct" && body.use !== "current") {
+      res.status(400).json({ error: "bad_request", message: 'use must be "current" or "direct"' });
+      return;
+    }
+    const input = body.use === "direct"
+      ? { use: "direct" as const, sending: cred(body.sending), receiving: cred(body.receiving) }
+      : { use: "current" as const };
+    const job = await attachCredentials(req.params.id!, input);
+    res.json(publicJob(job));
+  } catch (err) {
+    if (err instanceof AttachError) {
+      if (err.message === "not_found") res.status(404).json({ error: "not_found" });
+      else res.status(400).json({ error: "attach_failed", message: maskSecrets(err.message) });
+      return;
+    }
+    next(err);
+  }
+});
+
+migrateDevicesRouter.post("/migrate/devices/jobs/:id/credentials/remove", jsonOnly, async (req, res, next) => {
+  try {
+    const job = await removeCredentials(req.params.id!);
+    if (!job) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+    res.json(publicJob(job));
   } catch (err) {
     next(err);
   }
@@ -171,10 +243,21 @@ migrateDevicesRouter.post("/migrate/devices/jobs/:id/group-membership", async (r
       res.status(404).json({ error: "not_found", message: err.message });
       return;
     }
+    if (err instanceof JobAccessError) {
+      res.status(409).json({ error: `job_${err.problem}`, message: maskSecrets(err.message) });
+      return;
+    }
     next(err);
   }
 });
 
+/**
+ * Live updates for one job. Each status event carries the job and when the
+ * next check is due. The interval follows the job (nextCheckDelayMs): quick
+ * during the handover, slower while devices wait to check in, slow when the
+ * credentials were refused. The stream ends once the job has finished, and
+ * stops the moment the browser goes away.
+ */
 migrateDevicesRouter.get("/migrate/devices/jobs/:id/stream", async (req, res) => {
   const jobId = req.params.id!;
   let job;
@@ -183,7 +266,7 @@ migrateDevicesRouter.get("/migrate/devices/jobs/:id/stream", async (req, res) =>
   } catch (err) {
     res.status(500).json({
       error: "store_read_failed",
-      message: err instanceof Error ? err.message : String(err),
+      message: maskSecrets(err instanceof Error ? err.message : String(err)),
     });
     return;
   }
@@ -200,48 +283,81 @@ migrateDevicesRouter.get("/migrate/devices/jobs/:id/stream", async (req, res) =>
   });
   res.flushHeaders?.();
 
-  let cancelled = false;
+  let closed = false;
+  let timer: NodeJS.Timeout | undefined;
   const send = (event: string, data: unknown) => {
-    if (cancelled) return;
+    if (closed) return;
     res.write(`event: ${event}\n`);
     res.write(`data: ${JSON.stringify(data)}\n\n`);
   };
+  const end = () => {
+    closed = true;
+    if (timer) clearTimeout(timer);
+    res.end();
+  };
+  const withNext = (view: PublicJob, delay: number | null) => ({
+    ...view,
+    nextCheckAt: delay === null ? null : new Date(Date.now() + delay).toISOString(),
+  });
 
-  // Send initial snapshot immediately
-  send("status", job);
+  const FIRST_CHECK_MS = 1500;
+  send("status", withNext(publicJob(job), FIRST_CHECK_MS));
 
   const tick = async () => {
-    if (cancelled) return;
+    timer = undefined;
+    if (closed) return;
+    let updated: LocalMigrationJob | null;
     try {
-      const updated = await pollJob(jobId);
-      if (!updated) {
-        send("done", { reason: "job_deleted" });
-        cancelled = true;
-        res.end();
-        return;
-      }
-      send("status", updated);
-      // A handed-over device is followed until it checks in on the receiving tenant.
-      const terminal = ["complete", "failed", "partially-complete", "cancelled"];
-      if (terminal.includes(updated.status) && !awaitingCheckIn(updated)) {
-        send("done", { status: updated.status });
-        cancelled = true;
-        res.end();
-        return;
-      }
+      // Shares a check already running for this job, and skips one made in the last few seconds.
+      updated = await pollJob(jobId, { minAgeMs: 5_000 });
     } catch (err) {
-      send("error", { message: err instanceof Error ? err.message : String(err) });
+      send("error", { message: maskSecrets(err instanceof Error ? err.message : String(err)) });
+      updated = await getJob(jobId).catch(() => null);
     }
-    if (!cancelled) setTimeout(tick, 10_000);
+    if (closed) return;
+    if (!updated) {
+      send("done", { reason: "job_deleted" });
+      end();
+      return;
+    }
+    const view = publicJob(updated);
+    const delay = nextCheckDelayMs(updated, view.progress);
+    send("status", withNext(view, delay));
+    if (delay === null) {
+      send("done", { status: view.status });
+      end();
+      return;
+    }
+    timer = setTimeout(tick, delay);
   };
 
-  // Start the polling loop a beat after the initial snapshot.
-  setTimeout(tick, 1500);
+  timer = setTimeout(tick, FIRST_CHECK_MS);
 
   req.on("close", () => {
-    cancelled = true;
+    closed = true;
+    if (timer) clearTimeout(timer);
   });
 });
+
+/**
+ * The credential routes accept JSON only. A page on another site can post a
+ * form to 127.0.0.1 without the browser asking first, but not a JSON request.
+ */
+function jsonOnly(req: import("express").Request, res: import("express").Response, next: import("express").NextFunction): void {
+  if (!req.is("application/json")) {
+    res.status(415).json({ error: "unsupported_media_type", message: "Send JSON." });
+    return;
+  }
+  next();
+}
+
+function cred(v: unknown): { clientId: string; clientSecret: string } {
+  const o = (v ?? {}) as Record<string, unknown>;
+  return {
+    clientId: typeof o.clientId === "string" ? o.clientId : "",
+    clientSecret: typeof o.clientSecret === "string" ? o.clientSecret : "",
+  };
+}
 
 // --- Merged job type used by the /all endpoint ---
 
@@ -256,9 +372,12 @@ export interface MergedMigrationJob {
   createdAt?: string;
   sourceMigrationId?: string;
   destMigrationId?: string;
-  sourceSnapshot?: SophosMigrationJob | null;
-  destSnapshot?: SophosMigrationJob | null;
   lastPolledAt?: string;
+  /** Local jobs: progress, tenants, how the last check went, and whether credentials are stored. */
+  progress?: PublicJob["progress"];
+  tenants?: PublicJob["tenants"];
+  monitor?: PublicJob["monitor"];
+  credentials?: PublicJob["credentials"];
   /** For API-only jobs: which tenant ("source" or "dest") reported this job */
   apiTenant?: string;
   /** For API-only jobs: the display name of the tenant */

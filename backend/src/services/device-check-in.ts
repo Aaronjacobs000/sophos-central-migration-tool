@@ -49,6 +49,11 @@ export function checkInFor(
   previous?: DeviceCheckIn,
 ): DeviceCheckIn {
   if (previous?.state === "checked-in") return previous;
+  // Without the job's answer (the call failed, or Sophos no longer returns an
+  // expired job), a device already handed over is still looked up by its new ID.
+  if (!moved && previous?.state === "waiting" && previous.newId) {
+    moved = { id: "", status: "succeeded", newId: previous.newId, migratedAt: previous.handedOverAt };
+  }
   if (!moved) return previous ?? { state: "not-moved" };
   const status = (moved.status ?? "").toLowerCase();
   if (FAILED.has(status)) return { state: "move-failed" };
@@ -72,18 +77,31 @@ export function checkInFor(
  * carry newId; the sending side's fill any device the receiving side did not
  * return. Only devices handed over and not yet checked in are looked up, by ID.
  */
-export async function refreshCheckIns(
-  job: LocalMigrationJob,
-  receiving: MigrationEndpointStatus[] | null,
-  sending: MigrationEndpointStatus[] | null,
-  to: TenantContext,
-): Promise<{ checkIns: Record<string, DeviceCheckIn>; error?: string }> {
+/**
+ * One entry per device from both sides of a job. The receiving side's entries
+ * carry newId; the sending side's fill any device the receiving side did not
+ * return.
+ */
+export function mergeEndpointStatuses(
+  receiving: MigrationEndpointStatus[] | null | undefined,
+  sending: MigrationEndpointStatus[] | null | undefined,
+): Map<string, MigrationEndpointStatus> {
   const byId = new Map<string, MigrationEndpointStatus>();
   for (const e of receiving ?? []) byId.set(e.id, e);
   for (const e of sending ?? []) {
     const known = byId.get(e.id);
     byId.set(e.id, known ? { ...e, ...known, newId: known.newId ?? e.newId, migratedAt: known.migratedAt ?? e.migratedAt } : e);
   }
+  return byId;
+}
+
+export async function refreshCheckIns(
+  job: LocalMigrationJob,
+  receiving: MigrationEndpointStatus[] | null,
+  sending: MigrationEndpointStatus[] | null,
+  to: TenantContext,
+): Promise<{ checkIns: Record<string, DeviceCheckIn>; error?: string }> {
+  const byId = mergeEndpointStatuses(receiving, sending);
 
   const previous = job.checkIns ?? {};
   const wanted = new Set<string>();

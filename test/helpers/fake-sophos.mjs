@@ -15,20 +15,46 @@ export const DST = {
   host: "https://api-dst.example.test",
 };
 
+/** A third tenant, for pointing the tool at another pair. */
+export const OTHER = {
+  tenantId: "33333333-3333-4333-8333-333333333333",
+  clientId: "oth-client",
+  secret: "oth-secret",
+  host: "https://api-oth.example.test",
+};
+
 const GLOBAL = "https://api.central.sophos.com";
 const AUTH = "https://id.sophos.com/api/v2/oauth2/token";
 
 export function createFakeSophos() {
   const calls = [];
-  const tenants = { [SRC.tenantId]: SRC, [DST.tenantId]: DST };
-  const byToken = { "tok-src": SRC, "tok-dst": DST };
+  const tenants = { [SRC.tenantId]: SRC, [DST.tenantId]: DST, [OTHER.tenantId]: OTHER };
+  const byToken = { "tok-src": SRC, "tok-dst": DST, "tok-oth": OTHER };
   // routes[tenantId] = [{ method, path (string or RegExp), handler(req) }]
-  const routes = { [SRC.tenantId]: [], [DST.tenantId]: [] };
+  const routes = { [SRC.tenantId]: [], [DST.tenantId]: [], [OTHER.tenantId]: [] };
   const globalRoutes = [];
+  // Tenants whose API credential has been deleted: sign-in and every call with its token are refused.
+  const revoked = new Set();
   let seq = 0;
 
   const fake = {
     calls,
+    /** Add a tenant: { tenantId, clientId, secret, host }. Its access token is "tok-" + clientId. */
+    addTenant(t) {
+      tenants[t.tenantId] = t;
+      byToken[`tok-${t.clientId}`] = t;
+      routes[t.tenantId] = [];
+      return t;
+    },
+    /** Delete a tenant's API credential, as if removed in Sophos Fusion. */
+    revoke(tenant) {
+      revoked.add(tenant.tenantId);
+      return fake;
+    },
+    restore(tenant) {
+      revoked.delete(tenant.tenantId);
+      return fake;
+    },
     /** Register a handler for one tenant. Later registrations win. */
     on(tenant, method, path, handler) {
       routes[tenant.tenantId].unshift({ method, path, handler });
@@ -64,18 +90,23 @@ export function createFakeSophos() {
     if (url.href === AUTH) {
       const form = new URLSearchParams(init.body);
       const id = form.get("client_id");
-      calls.push({ kind: "auth", method, url: url.href });
-      if (id === SRC.clientId && form.get("client_secret") === SRC.secret) return json(200, { access_token: "tok-src", expires_in: 3600, token_type: "bearer" });
-      if (id === DST.clientId && form.get("client_secret") === DST.secret) return json(200, { access_token: "tok-dst", expires_in: 3600, token_type: "bearer" });
+      calls.push({ kind: "auth", method, url: url.href, clientId: id });
+      const t = Object.values(tenants).find((x) => x.clientId === id);
+      if (t && !revoked.has(t.tenantId) && form.get("client_secret") === t.secret) {
+        const token = Object.keys(byToken).find((k) => byToken[k] === t);
+        return json(200, { access_token: token, expires_in: 3600, token_type: "bearer" });
+      }
       return json(401, { error: "invalid_client" });
     }
 
     const bearer = (headers.authorization ?? "").replace(/^Bearer /, "");
     const caller = byToken[bearer];
-    if (!caller) return json(401, { error: "Unauthorized", message: "bad token" });
+    if (!caller || revoked.has(caller.tenantId)) return json(401, { error: "Unauthorized", message: "bad token" });
 
     if (url.origin === GLOBAL && url.pathname === "/whoami/v1") {
       calls.push({ kind: "whoami", method, url: url.href });
+      // A tenant added with idType "partner" answers as a partner credential (no data region of its own).
+      if (caller.idType === "partner") return json(200, { id: caller.tenantId, idType: "partner", apiHosts: { global: GLOBAL } });
       return json(200, { id: caller.tenantId, idType: "tenant", apiHosts: { global: GLOBAL, dataRegion: caller.host } });
     }
 
@@ -91,7 +122,7 @@ export function createFakeSophos() {
     const tenant = Object.values(tenants).find((t) => t.host === url.origin);
     if (!tenant) throw new Error(`fake-sophos: unexpected host ${url.origin}`);
     if (headers["x-tenant-id"] !== tenant.tenantId) return json(403, { error: "Forbidden", message: "tenant header mismatch" });
-    calls.push({ kind: "tenant", tenant: tenant === SRC ? "src" : "dst", ...req, url: url.href });
+    calls.push({ kind: "tenant", tenant: tenant === SRC ? "src" : tenant === DST ? "dst" : tenant === OTHER ? "oth" : tenant.tenantId, ...req, url: url.href });
     const route = match(routes[tenant.tenantId], method, url.pathname);
     if (!route) {
       if (method === "GET") return json(200, { items: [], pages: { current: 1, size: 100, total: 1, maxSize: 100 } });

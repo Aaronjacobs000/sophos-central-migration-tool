@@ -34,8 +34,21 @@ import {
 import { audit } from "./audit-log.js";
 import { checkMigrationWindow } from "./migration-window.js";
 import { refreshCheckIns } from "./device-check-in.js";
-import { log, registerSecret } from "../log.js";
+import { jobProgress } from "./job-progress.js";
+import {
+  contextsForJob,
+  forgetJobContexts,
+  isNotFound,
+  isRejection,
+  JobAccessError,
+  releaseCredentials,
+  storeCurrentCredentials,
+  tenantOf,
+} from "./job-access.js";
+import { log, maskSecrets, registerSecret } from "../log.js";
 import type { SophosEndpoint } from "../sophos/types/sophos.js";
+import type { SophosMigrationJob } from "../sophos/types/migration.js";
+import type { JobCredentialRefs, JobMonitor } from "./migration-store.js";
 
 const FOURTEEN_DAYS_MS = 14 * 24 * 60 * 60 * 1000;
 
@@ -243,33 +256,90 @@ export async function startMigration(
     throw err;
   }
 
-  // Step 4: persist locally.
+  // Step 4: persist locally, with the tenants the job ran against and the
+  // credentials to check it with later (encrypted, see job-credentials.ts), so
+  // it keeps checking these tenants after the tool is pointed elsewhere.
   // The migration job ID is shared across both tenants (same ID).
-  const job = await createJob({
-    jobName: req.jobName,
-    sourceMigrationId: sender.id,
-    destMigrationId: receiver.id,
-    endpointIds: acceptedEndpoints.map((e) => e.id),
-    endpointHostnames: Object.fromEntries(
-      acceptedEndpoints.map((e) => [e.id, e.hostname ?? ""]),
-    ),
-    endpointGroups,
-    direction,
-  });
+  const sourceCtx = direction === "source-to-dest" ? from : to;
+  const destCtx = direction === "source-to-dest" ? to : from;
+  let credentials: JobCredentialRefs | undefined;
+  try {
+    credentials = (await storeCurrentCredentials()) ?? undefined;
+  } catch (err) {
+    log.emit("warn", "migration", `Credentials could not be stored with the job, so it can only be checked while the tool points at these tenants: ${maskSecrets(err instanceof Error ? err.message : String(err))}`);
+  }
+  let job: LocalMigrationJob;
+  try {
+    job = await createJob({
+      jobName: req.jobName,
+      sourceMigrationId: sender.id,
+      destMigrationId: receiver.id,
+      endpointIds: acceptedEndpoints.map((e) => e.id),
+      endpointHostnames: Object.fromEntries(
+        acceptedEndpoints.map((e) => [e.id, e.hostname ?? ""]),
+      ),
+      endpointGroups,
+      direction,
+      tenants: { source: tenantOf(sourceCtx), dest: tenantOf(destCtx) },
+      credentials,
+    });
+  } finally {
+    releaseCredentials(credentials);
+  }
 
   return { preflightFailures: [], job };
 }
 
+const inFlight = new Map<string, Promise<LocalMigrationJob | null>>();
+
 /**
- * Poll both source and destination for the given local job and merge the
- * results. Updates the local store and returns the latest snapshot.
+ * Check a job on both of its tenants and save the result. Concurrent callers
+ * (the job page stream, the Migrations list) share one check. With
+ * minAgeMs, a job checked more recently than that is returned as saved.
  */
-export async function pollJob(localJobId: string): Promise<LocalMigrationJob | null> {
+export async function pollJob(
+  localJobId: string,
+  opts: { minAgeMs?: number } = {},
+): Promise<LocalMigrationJob | null> {
+  const running = inFlight.get(localJobId);
+  if (running) return running;
+  if (opts.minAgeMs) {
+    const saved = await getJob(localJobId);
+    if (!saved) return null;
+    const last = Date.parse(saved.monitor?.lastTriedAt ?? saved.lastPolledAt ?? "");
+    if (Number.isFinite(last) && Date.now() - last < opts.minAgeMs) return saved;
+  }
+  const p = pollOnce(localJobId).finally(() => inFlight.delete(localJobId));
+  inFlight.set(localJobId, p);
+  return p;
+}
+
+/**
+ * One check. A failed call never replaces what was saved: the snapshots and
+ * check-ins stay as the last successful check left them, and only the monitor
+ * state says what went wrong.
+ */
+async function pollOnce(localJobId: string): Promise<LocalMigrationJob | null> {
   const job = await getJob(localJobId);
   if (!job) return null;
+  const now = new Date().toISOString();
+  const monitorFail = (state: JobMonitor["state"], message: string, via?: JobMonitor["via"]): JobMonitor => ({
+    ...job.monitor,
+    state,
+    via: via ?? job.monitor?.via,
+    message: maskSecrets(message),
+    lastTriedAt: now,
+  });
 
-  const src = requireContext("source");
-  const dst = requireContext("dest");
+  let ctx;
+  try {
+    ctx = await contextsForJob(job);
+  } catch (err) {
+    const problem = err instanceof JobAccessError ? err.problem : "error";
+    const message = err instanceof Error ? err.message : String(err);
+    return updateJob(localJobId, { monitor: monitorFail(problem, message), lastPolledAt: now });
+  }
+  const { source: src, dest: dst } = ctx;
 
   const [srcJob, dstJob, srcEndpoints, dstEndpoints] = await Promise.all([
     safe(() => getMigrationJob(src.client, src.tenantId, job.sourceMigrationId)),
@@ -277,19 +347,48 @@ export async function pollJob(localJobId: string): Promise<LocalMigrationJob | n
     safe(() => listMigrationJobEndpoints(src.client, src.tenantId, job.sourceMigrationId)),
     safe(() => listMigrationJobEndpoints(dst.client, dst.tenantId, job.destMigrationId)),
   ]);
+  const errors = [srcJob, dstJob, srcEndpoints, dstEndpoints].map((r) => r.error).filter((e): e is string => !!e);
 
-  // Decide aggregate status from job-level AND endpoint-level data.
-  const allEndpoints = [
-    ...(srcEndpoints.value ?? []),
-    ...(dstEndpoints.value ?? []),
-  ];
-  const status = aggregateStatus(
-    srcJob.value,
-    dstJob.value,
-    allEndpoints,
-    job.endpointIds.length,
-    job.status,
-  );
+  const rejected = errors.find(isRejection);
+  if (rejected) {
+    if (ctx.via === "stored") forgetJobContexts(job);
+    return updateJob(localJobId, { monitor: monitorFail("rejected", rejected, ctx.via), lastPolledAt: now });
+  }
+
+  // An older job with no recorded tenants is only checked with the current
+  // connection when both tenants know this migration job; otherwise the tool
+  // points at another pair and the answers would be about nothing.
+  let tenants = job.tenants;
+  if (ctx.unverified) {
+    if (isNotFound(srcJob.error) || isNotFound(dstJob.error)) {
+      return updateJob(localJobId, {
+        monitor: monitorFail("not-found", "This job was not found on the tenants the tool points at now, so it was not checked. Attach the credentials it ran with.", "current"),
+        lastPolledAt: now,
+      });
+    }
+    if (!srcJob.value || !dstJob.value) {
+      return updateJob(localJobId, { monitor: monitorFail("error", errors[0] ?? "No answer from Sophos.", "current"), lastPolledAt: now });
+    }
+    const sendingMode = String((job.direction === "dest-to-source" ? dstJob.value : srcJob.value).mode ?? "").toLowerCase();
+    if (sendingMode && sendingMode !== "sending") {
+      return updateJob(localJobId, {
+        monitor: monitorFail("not-found", "The tool's source and destination are the other way round from when this job ran, so it was not checked. Attach the credentials it ran with.", "current"),
+        lastPolledAt: now,
+      });
+    }
+    tenants = { source: tenantOf(src), dest: tenantOf(dst) };
+  }
+
+  const snapshot = (
+    fresh: SophosMigrationJob | null,
+    endpoints: unknown[] | null,
+    saved: SophosMigrationJob | null,
+  ): SophosMigrationJob | null => {
+    const savedDetails = (saved as { endpointDetails?: unknown[] } | null)?.endpointDetails;
+    if (!fresh && !endpoints) return saved;
+    // Stash per-endpoint statuses on the snapshot for the UI (not part of the upstream type).
+    return { ...(saved ?? {}), ...(fresh ?? {}), endpointDetails: endpoints ?? savedDetails ?? [] } as SophosMigrationJob;
+  };
 
   // Handover is not arrival: each device moves when it next checks in.
   const receivingIsSource = job.direction === "dest-to-source";
@@ -299,85 +398,33 @@ export async function pollJob(localJobId: string): Promise<LocalMigrationJob | n
     receivingIsSource ? dstEndpoints.value : srcEndpoints.value,
     receivingIsSource ? src : dst,
   );
+  if (checkIn.error && isRejection(checkIn.error)) {
+    if (ctx.via === "stored") forgetJobContexts(job);
+    return updateJob(localJobId, { monitor: monitorFail("rejected", checkIn.error, ctx.via), lastPolledAt: now });
+  }
 
-  const updated = await updateJob(localJobId, {
-    sourceSnapshot: srcJob.value
-      ? {
-          ...srcJob.value,
-          // Stash per-endpoint statuses on the snapshot for the UI.
-          // (Not part of the upstream type but useful for clients.)
-          // @ts-expect-error - extending shape for client use
-          endpointDetails: srcEndpoints.value ?? [],
-        }
-      : null,
-    destSnapshot: dstJob.value
-      ? {
-          ...dstJob.value,
-          // @ts-expect-error - extending shape for client use
-          endpointDetails: dstEndpoints.value ?? [],
-        }
-      : null,
-    status,
+  const next: LocalMigrationJob = {
+    ...job,
+    tenants,
+    sourceSnapshot: snapshot(srcJob.value, srcEndpoints.value, job.sourceSnapshot),
+    destSnapshot: snapshot(dstJob.value, dstEndpoints.value, job.destSnapshot),
     checkIns: checkIn.checkIns,
-    lastPolledAt: new Date().toISOString(),
-    lastError: srcJob.error ?? dstJob.error ?? checkIn.error,
+  };
+  const problem = errors[0] ?? checkIn.error;
+  const monitor: JobMonitor = problem
+    ? monitorFail("error", problem, ctx.via)
+    : { state: "ok", via: ctx.via, lastOkAt: now, lastTriedAt: now };
+
+  return updateJob(localJobId, {
+    tenants,
+    sourceSnapshot: next.sourceSnapshot,
+    destSnapshot: next.destSnapshot,
+    checkIns: next.checkIns,
+    status: jobProgress(next).status,
+    monitor,
+    lastPolledAt: now,
+    lastError: problem ? maskSecrets(problem) : undefined,
   });
-
-  return updated;
-}
-
-/**
- * Determine the aggregate migration status from job-level and endpoint-level
- * data. The Sophos API doesn't always populate a top-level job status, so
- * endpoint-level statuses are the most reliable signal.
- */
-function aggregateStatus(
-  src: { status?: string } | null,
-  dst: { status?: string } | null,
-  endpoints: Array<{ status?: string }>,
-  expectedCount: number,
-  current: LocalMigrationJob["status"],
-): LocalMigrationJob["status"] {
-  // Only jobs saved by versions that had a Cancel button carry this status.
-  if (current === "cancelled") return "cancelled";
-
-  const isMatch = (value: string, tokens: string[]) =>
-    tokens.some((t) => value.includes(t));
-
-  const failedTokens = ["failed", "error"];
-  const completeTokens = ["complete", "completed", "succeeded", "migrated"];
-
-  // 1. Check job-level status first (some API versions do populate it)
-  const s = (src?.status ?? "").toLowerCase();
-  const d = (dst?.status ?? "").toLowerCase();
-
-  if (isMatch(s, failedTokens) || isMatch(d, failedTokens)) {
-    return "failed";
-  }
-  if (isMatch(s, completeTokens) && isMatch(d, completeTokens)) {
-    return "complete";
-  }
-
-  // 2. Fall back to endpoint-level statuses (the reliable signal).
-  //    Deduplicate by looking at both source and dest endpoint lists.
-  //    Each endpoint appears in both, so count distinct statuses.
-  const epStatuses = endpoints.map((e) => (e.status ?? "").toLowerCase());
-  const succeeded = epStatuses.filter((s) => isMatch(s, completeTokens)).length;
-  const failed = epStatuses.filter((s) => isMatch(s, failedTokens)).length;
-  const pending = epStatuses.filter((s) => s === "pending" || s === "").length;
-
-  // Both sender and receiver report per-endpoint status, so a single
-  // endpoint shows up twice (once on each side). Use the endpoint count
-  // from the local job as ground truth.
-  // If every endpoint succeeded on at least one side, the migration worked.
-  if (succeeded > 0 && failed === 0 && pending === 0) {
-    return "complete";
-  }
-  if (failed > 0 && pending === 0) {
-    return succeeded > 0 ? "partially-complete" : "failed";
-  }
-
-  return "in-progress";
 }
 
 /**
