@@ -117,8 +117,8 @@ test("dry run: plans additions by name, skips members and reports gaps, writes n
   assert.equal(by(5).status, "not-moved");
   assert.deepEqual(res.groups, [{ name: "FINANCE", destGroupId: "dg-fin", ids: ["new-1"], ok: null }]);
   assert.deepEqual(res.destGroups, [{ id: "dg-fin", name: "FINANCE", type: "computer" }], "the picker's list");
-  assert.match(by(3).message, /no group named "SQL" on the destination; pick one, or mirror it on the Groups page first/);
-  assert.match(by(4).message, /pick a destination group to add it/);
+  assert.match(by(3).message, /no group named "SQL" here; pick one, or mirror it on the Groups page/);
+  assert.match(by(4).message, /in no group on the sending tenant; pick one to add it/);
 });
 
 test("picked groups: a device goes to the group picked for it, one in no group can be placed, and null leaves one out", async () => {
@@ -163,7 +163,7 @@ test("a picked group that is not on the destination is reported, and nothing is 
   const res = await restoreGroupMembership("local-1", { dryRun: false, choices: { [uuid(1)]: "dg-gone" } });
   const r1 = res.rows.find((r) => r.endpointId === uuid(1));
   assert.equal(r1.status, "group-missing");
-  assert.match(r1.message, /the group picked is not on the destination any more/);
+  assert.match(r1.message, /the group picked is no longer on the destination/);
   assert.equal(fake.writes().length, 0);
 });
 

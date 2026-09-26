@@ -174,21 +174,21 @@ export async function restoreGroupMembership(
     if (choice) {
       dest = destGroupById.get(choice);
       if (!dest) {
-        rows.push({ ...base, status: "group-missing", message: "the group picked is not on the destination any more; pick another" });
+        rows.push({ ...base, status: "group-missing", message: "the group picked is no longer on the destination; pick another" });
         continue;
       }
     } else {
       if (group === undefined) {
-        rows.push({ ...base, status: "no-group", message: "no group was recorded for this device; pick a destination group to add it" });
+        rows.push({ ...base, status: "no-group", message: "no group was recorded; pick one to add it" });
         continue;
       }
       if (group === null) {
-        rows.push({ ...base, status: "no-group", message: "the device was in no group on the sending tenant; pick a destination group to add it" });
+        rows.push({ ...base, status: "no-group", message: "in no group on the sending tenant; pick one to add it" });
         continue;
       }
       dest = destGroupByName.get(nameKey(group.name));
       if (!dest) {
-        rows.push({ ...base, status: "group-missing", message: `no group named "${group.name}" on the destination; pick one, or mirror it on the Groups page first` });
+        rows.push({ ...base, status: "group-missing", message: `no group named "${group.name}" here; pick one, or mirror it on the Groups page` });
         continue;
       }
     }
