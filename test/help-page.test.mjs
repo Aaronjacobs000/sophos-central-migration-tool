@@ -24,3 +24,23 @@ test("Help says partner and organization credentials work, as the README and the
   assert.match(help, /one partner or organization credential that manages both tenants/);
   assert.match(readme, /one partner or organization credential that manages both tenants/);
 });
+
+test("Help's Dry runs card names the Preview buttons the pages have, and the pages without one", async () => {
+  const card = help.slice(help.indexOf("<h2>Dry runs</h2>"), help.indexOf("<h2>Audit log</h2>"));
+  assert.doesNotMatch(card, /The Preview buttons run it/);
+  const page = (file) => readFile(new URL(`../frontend/${file}`, import.meta.url), "utf8");
+  const button = (html, label) => new RegExp(`<button[^>]*>${label.replace(/[()]/g, "\\$&")}</button>`).test(html);
+  for (const [file, label, named] of [
+    ["exclusions.html", "Preview", "Exclusions"],
+    ["web-filtering.html", "Preview", "Web filtering"],
+    ["migrate.html", "Preview (dry run)", "Start migration"],
+    ["migrate-job-detail.html", "Preview", "Group membership card"],
+  ]) {
+    assert.ok(button(await page(file), label), `${file} has ${label}`);
+    assert.ok(card.includes(named), `Help names ${named}`);
+  }
+  for (const file of ["policies.html", "groups.html"]) {
+    assert.doesNotMatch(await page(file), /Preview/, `${file} has no preview`);
+  }
+  assert.match(card, /The Policies and Groups pages have no preview/);
+});
