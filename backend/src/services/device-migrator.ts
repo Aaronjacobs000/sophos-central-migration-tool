@@ -32,7 +32,7 @@ import {
   type EndpointGroupRef,
   type LocalMigrationJob,
 } from "./migration-store.js";
-import { audit } from "./audit-log.js";
+import { audit, auditedDelete } from "./audit-log.js";
 import { checkMigrationWindow } from "./migration-window.js";
 import { refreshCheckIns } from "./device-check-in.js";
 import { jobProgress } from "./job-progress.js";
@@ -202,7 +202,21 @@ export async function startMigration(
     side: to.label as "source" | "dest",
     detail: { body: receiverBody },
   });
-  const receiver = await createReceiverJob(to.client, to.tenantId, receiverBody);
+  let receiver: Awaited<ReturnType<typeof createReceiverJob>>;
+  try {
+    receiver = await createReceiverJob(to.client, to.tenantId, receiverBody);
+  } catch (err) {
+    await audit({
+      side: to.label,
+      tenantId: to.tenantId,
+      action: "create",
+      resource: "migration-receiver",
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+      detail: { jobName: req.jobName, direction },
+    });
+    throw err;
+  }
   log.emit("info", "migration", `Receiver job created: id=${receiver.id}, mode=${(receiver as any).mode}`, {
     side: to.label as "source" | "dest",
     detail: { response: receiver },
@@ -254,7 +268,20 @@ export async function startMigration(
       },
     });
   } catch (err) {
-    try { await deleteMigrationJob(to.client, to.tenantId, receiver.id); } catch { /* best-effort */ }
+    if (!sender) {
+      await audit({
+        side: from.label,
+        tenantId: from.tenantId,
+        action: "create",
+        resource: "migration-sender",
+        resourceId: receiver.id,
+        ok: false,
+        error: maskSecrets(err instanceof Error ? err.message : String(err)),
+        detail: { jobName: req.jobName, direction, receiverId: receiver.id },
+      });
+    }
+    // Best effort, and audited like any other delete.
+    await auditedDelete(to, "migration-receiver", receiver.id, () => deleteMigrationJob(to.client, to.tenantId, receiver.id)).catch(() => {});
     throw err;
   }
 

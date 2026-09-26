@@ -10,7 +10,7 @@ import {
   updatePolicy,
   deletePolicy,
 } from "../sophos/api/policies.js";
-import { auditedDelete } from "../services/audit-log.js";
+import { auditedDelete, auditedWrite } from "../services/audit-log.js";
 
 export const policiesRouter = Router();
 
@@ -41,7 +41,8 @@ policiesRouter.get("/:side/policies/:id", async (req, res, next) => {
 policiesRouter.post("/:side/policies", jsonBody, async (req, res, next) => {
   try {
     const ctx = res.locals.tenantContext!;
-    const created = await createPolicy(ctx.client, ctx.tenantId, req.body);
+    const created = await auditedWrite(ctx, "create", "policy", undefined,
+      () => createPolicy(ctx.client, ctx.tenantId, req.body), { name: req.body?.name, type: req.body?.type });
     res.status(201).json(created);
   } catch (err) {
     next(err);
@@ -56,7 +57,8 @@ policiesRouter.post("/:side/policies/:id/clone", async (req, res, next) => {
       res.status(400).json({ error: "bad_request", message: "name required" });
       return;
     }
-    const cloned = await clonePolicy(ctx.client, ctx.tenantId, req.params.id!, newName);
+    const cloned = await auditedWrite(ctx, "clone", "policy", undefined,
+      () => clonePolicy(ctx.client, ctx.tenantId, req.params.id!, newName), { sourceId: req.params.id, name: newName });
     res.status(201).json(cloned);
   } catch (err) {
     next(err);
@@ -66,7 +68,9 @@ policiesRouter.post("/:side/policies/:id/clone", async (req, res, next) => {
 policiesRouter.patch("/:side/policies/:id", async (req, res, next) => {
   try {
     const ctx = res.locals.tenantContext!;
-    const updated = await updatePolicy(ctx.client, ctx.tenantId, req.params.id!, req.body);
+    const updated = await auditedWrite(ctx, "update", "policy", req.params.id!,
+      () => updatePolicy(ctx.client, ctx.tenantId, req.params.id!, req.body),
+      { fields: Object.keys(req.body ?? {}), settings: Object.keys(req.body?.settings ?? {}) });
     res.json(updated);
   } catch (err) {
     next(err);

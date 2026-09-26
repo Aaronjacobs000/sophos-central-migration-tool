@@ -68,6 +68,8 @@ export async function startHttp(mounts) {
     get: (p) => call("GET", p),
     post: (p, body) => call("POST", p, body ?? {}),
     del: (p) => call("DELETE", p),
+    patch: (p, body) => call("PATCH", p, body ?? {}),
+    put: (p, body) => call("PUT", p, body ?? {}),
     /** A plain HTML form post, as another site could send. */
     form: (p, text) => call("POST", p, text, "application/x-www-form-urlencoded"),
     /** A text/plain post, which another site can also send without a preflight. */

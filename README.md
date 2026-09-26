@@ -196,7 +196,7 @@ data/                            # Created at run time, not committed
   - The job page has *Remove stored credentials*. Use it once a job has finished; an entry no job uses is deleted. The tool's own `.env` is not changed.
   - They are stored rather than read from `.env` because `.env` holds only the pair the tool points at now, so a reference into it would break, or point at the wrong tenants, as soon as the tool is repointed.
 - Exclusion and web filtering copies, device migrations and group membership can be run as a dry run first from the page, which returns what would be created or changed without touching the destination. The API accepts `dryRun` on policy and group copies too.
-- Copies, clones, deletes and migrations are recorded in `data/audit.log` with a timestamp, ID, side, tenant ID, resource and result.
+- Every write to a tenant, from the pages or straight through the API (copies, clones, creates, updates, deletes and migrations), is recorded in `data/audit.log` with a timestamp, ID, side, tenant ID, resource and result, including writes Sophos refuses.
 - Deleting a policy, group or exclusion asks for confirmation twice. Overwriting a policy asks once.
 
 ## Credits

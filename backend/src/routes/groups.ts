@@ -15,7 +15,7 @@ import {
   deleteUserGroup,
 } from "../sophos/api/user-groups.js";
 import { listUsers } from "../sophos/api/users.js";
-import { auditedDelete } from "../services/audit-log.js";
+import { auditedDelete, auditedWrite } from "../services/audit-log.js";
 
 export const groupsRouter = Router();
 
@@ -56,7 +56,8 @@ groupsRouter.get("/:side/groups/:id/members", async (req, res, next) => {
 groupsRouter.post("/:side/groups", jsonBody, async (req, res, next) => {
   try {
     const ctx = res.locals.tenantContext!;
-    const created = await createGroup(ctx.client, ctx.tenantId, req.body);
+    const created = await auditedWrite(ctx, "create", "endpoint-group", undefined,
+      () => createGroup(ctx.client, ctx.tenantId, req.body), { name: req.body?.name });
     res.status(201).json(created);
   } catch (err) {
     next(err);
@@ -88,7 +89,8 @@ groupsRouter.get("/:side/user-groups", async (_req, res, next) => {
 groupsRouter.post("/:side/user-groups", jsonBody, async (req, res, next) => {
   try {
     const ctx = res.locals.tenantContext!;
-    const created = await createUserGroup(ctx.client, ctx.tenantId, req.body);
+    const created = await auditedWrite(ctx, "create", "user-group", undefined,
+      () => createUserGroup(ctx.client, ctx.tenantId, req.body), { name: req.body?.name });
     res.status(201).json(created);
   } catch (err) {
     next(err);

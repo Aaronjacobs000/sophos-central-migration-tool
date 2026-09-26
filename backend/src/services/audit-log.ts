@@ -44,21 +44,37 @@ export async function audit(entry: Omit<AuditEntry, "id" | "ts">): Promise<void>
 }
 
 /**
- * Runs one delete from a page's row menu and audits it, as done or with the
- * error, which is then rethrown for the route's error handler.
+ * Runs one write from an API route and audits it, as done or with the error,
+ * which is then rethrown for the route's error handler. With no resourceId,
+ * the entry takes the ID of what the write returned (a create).
  */
+export async function auditedWrite<T>(
+  ctx: { label: "source" | "dest"; tenantId: string },
+  action: string,
+  resource: string,
+  resourceId: string | undefined,
+  run: () => Promise<T>,
+  detail?: unknown,
+): Promise<T> {
+  const entry = { side: ctx.label, tenantId: ctx.tenantId, action, resource, ...(detail === undefined ? {} : { detail }) };
+  let result: T;
+  try {
+    result = await run();
+  } catch (err) {
+    await audit({ ...entry, resourceId, ok: false, error: err instanceof Error ? err.message : String(err) });
+    throw err;
+  }
+  const returnedId = (result as { id?: unknown } | null | undefined)?.id;
+  await audit({ ...entry, resourceId: resourceId ?? (typeof returnedId === "string" ? returnedId : undefined), ok: true });
+  return result;
+}
+
+/** Runs one delete from a page's row menu and audits it (see auditedWrite). */
 export async function auditedDelete(
   ctx: { label: "source" | "dest"; tenantId: string },
   resource: string,
   resourceId: string,
   run: () => Promise<unknown>,
 ): Promise<void> {
-  const entry = { side: ctx.label, tenantId: ctx.tenantId, action: "delete", resource, resourceId };
-  try {
-    await run();
-  } catch (err) {
-    await audit({ ...entry, ok: false, error: err instanceof Error ? err.message : String(err) });
-    throw err;
-  }
-  await audit({ ...entry, ok: true });
+  await auditedWrite(ctx, "delete", resource, resourceId, run);
 }

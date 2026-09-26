@@ -14,7 +14,7 @@ import {
   deleteBlockedItem,
 } from "../sophos/api/exclusions.js";
 import { listForType } from "../services/exclusion-copier.js";
-import { auditedDelete } from "../services/audit-log.js";
+import { auditedDelete, auditedWrite } from "../services/audit-log.js";
 
 export const exclusionsRouter = Router();
 
@@ -67,7 +67,8 @@ for (const type of ["isolation", "intrusion-prevention", "exploit-mitigation", "
 exclusionsRouter.post("/:side/exclusions/scanning", jsonBody, async (req, res, next) => {
   try {
     const ctx = res.locals.tenantContext!;
-    const created = await createScanningExclusion(ctx.client, ctx.tenantId, req.body);
+    const created = await auditedWrite(ctx, "create", "scanning", undefined,
+      () => createScanningExclusion(ctx.client, ctx.tenantId, req.body), { body: req.body });
     res.status(201).json(created);
   } catch (err) {
     next(err);
@@ -77,7 +78,8 @@ exclusionsRouter.post("/:side/exclusions/scanning", jsonBody, async (req, res, n
 exclusionsRouter.post("/:side/exclusions/allowed-items", jsonBody, async (req, res, next) => {
   try {
     const ctx = res.locals.tenantContext!;
-    const created = await createAllowedItem(ctx.client, ctx.tenantId, req.body);
+    const created = await auditedWrite(ctx, "create", "allowed-items", undefined,
+      () => createAllowedItem(ctx.client, ctx.tenantId, req.body), { body: req.body });
     res.status(201).json(created);
   } catch (err) {
     next(err);
@@ -87,7 +89,8 @@ exclusionsRouter.post("/:side/exclusions/allowed-items", jsonBody, async (req, r
 exclusionsRouter.post("/:side/exclusions/blocked-items", jsonBody, async (req, res, next) => {
   try {
     const ctx = res.locals.tenantContext!;
-    const created = await createBlockedItem(ctx.client, ctx.tenantId, req.body);
+    const created = await auditedWrite(ctx, "create", "blocked-items", undefined,
+      () => createBlockedItem(ctx.client, ctx.tenantId, req.body), { body: req.body });
     res.status(201).json(created);
   } catch (err) {
     next(err);
