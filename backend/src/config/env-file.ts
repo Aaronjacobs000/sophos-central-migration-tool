@@ -8,6 +8,10 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { isLock, readText, saveFile } from "../services/safe-files.js";
+
+/** Log section for lock retries on .env. */
+const SECTION = "credentials";
 
 export interface EnvFile {
   path: string;
@@ -22,14 +26,10 @@ export type EnvLine =
 const ENTRY_REGEX = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/;
 
 export async function readEnvFile(filePath: string): Promise<EnvFile> {
-  let content: string;
-  try {
-    content = await fs.readFile(filePath, "utf8");
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      return { path: filePath, lines: [] };
-    }
-    throw err;
+  // Retried while OneDrive or antivirus holds the file.
+  const content = await readText(filePath, SECTION);
+  if (content === null) {
+    return { path: filePath, lines: [] };
   }
 
   const rawLines = content.split(/\r?\n/);
@@ -128,19 +128,23 @@ export function renderEnvFile(file: EnvFile): string {
 }
 
 /**
- * Atomic write: render to a temp file in the same directory then rename.
- * Prevents a crashed write from leaving a half-written .env on disk.
+ * Atomic write: render to a temp file (mode 0600) in the same directory then
+ * rename. Prevents a crashed write from leaving a half-written .env on disk.
+ * Both steps retry while OneDrive or antivirus holds the file, and a save
+ * that still fails removes its temp file (safe-files.ts).
  */
 export async function writeEnvFile(file: EnvFile): Promise<void> {
   const dir = path.dirname(file.path);
   await fs.mkdir(dir, { recursive: true });
-  const tempPath = path.join(
-    dir,
-    `.${path.basename(file.path)}.tmp-${process.pid}-${Date.now()}`,
-  );
-  const rendered = renderEnvFile(file);
-  await fs.writeFile(tempPath, rendered, { encoding: "utf8", mode: 0o600 });
-  await fs.rename(tempPath, file.path);
+  await saveFile(file.path, renderEnvFile(file), { section: SECTION, mode: 0o600, failed: saveError });
+}
+
+/** An error that says .env was not saved, and for a lock, what usually holds it. */
+function saveError(err: unknown, file: string): Error {
+  const reason = isLock(err)
+    ? `${path.basename(file)} stayed locked (${(err as NodeJS.ErrnoException).code}), usually by OneDrive or antivirus. Try again`
+    : err instanceof Error ? err.message : String(err);
+  return new Error(`Couldn't save the credentials: ${reason}.`, { cause: err });
 }
 
 /**
