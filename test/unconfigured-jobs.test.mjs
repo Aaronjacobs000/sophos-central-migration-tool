@@ -55,6 +55,13 @@ await state.rebuildContexts();
 assert.equal(state.getState().status, "unconfigured");
 fake.reset();
 
+test("the job count for the setup wizard answers with no connection, and checks nothing", async () => {
+  const res = await http.get("/api/migrate/devices/jobs/count");
+  assert.equal(res.status, 200, res.text.slice(0, 200));
+  assert.deepEqual(res.body, { count: 2 });
+  assert.deepEqual(fake.calls, []);
+});
+
 test("the job list answers with no connection", async () => {
   for (const url of ["/api/migrate/devices/jobs", "/api/migrate/devices/jobs/all"]) {
     const res = await http.get(url);

@@ -178,6 +178,15 @@ migrateDevicesRouter.get("/migrate/devices/jobs/all", async (_req, res, next) =>
   }
 });
 
+/** How many jobs are saved, for the setup wizard's link to them. Reads the file only: no check, no save. */
+migrateDevicesRouter.get("/migrate/devices/jobs/count", async (_req, res, next) => {
+  try {
+    res.json({ count: (await listJobs()).length });
+  } catch (err) {
+    next(err);
+  }
+});
+
 migrateDevicesRouter.get("/migrate/devices/jobs/:id", async (req, res, next) => {
   try {
     const job = await getJob(req.params.id!);

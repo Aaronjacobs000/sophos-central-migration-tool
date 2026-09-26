@@ -318,6 +318,11 @@ function escAttr(s) { return esc(s).replace(/'/g, "&#39;"); }
 wire();
 showStep(1);
 
+// Saved jobs are checked with their own credentials, so their pages work before the tool is connected.
+api.get("/api/migrate/devices/jobs/count")
+  .then(({ count }) => { if (count > 0) $("#jobs-link").classList.remove("hidden"); })
+  .catch(() => {});
+
 // Tool mark, icons in static markup, and the show/hide control on secret fields.
 document.querySelectorAll("[data-mark]").forEach((el) => { el.outerHTML = mark("welcome-mark"); });
 document.querySelectorAll("[data-icon]").forEach((el) => { el.outerHTML = icon(el.dataset.icon); });
