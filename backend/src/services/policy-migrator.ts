@@ -24,11 +24,12 @@ import { listLocalSites } from "../sophos/api/web-control.js";
 import { listProfiles } from "../sophos/api/web-filters.js";
 import { requireContext } from "../state.js";
 import { audit } from "./audit-log.js";
+import { pairPolicy } from "../compare/policy-pairing.js";
 import type { SophosPolicy } from "../sophos/types/migration.js";
 
 export interface MigratePoliciesRequest {
   policyIds: string[];
-  /** If true, overwrite existing destination policies with the same name+type. */
+  /** If true, overwrite the destination policy each one pairs with (see pairPolicy). */
   overwrite?: boolean;
   dryRun?: boolean;
 }
@@ -55,8 +56,12 @@ export async function migratePolicies(
   const src = requireContext("source");
   const dst = requireContext("dest");
 
-  // Cache the destination's existing policies once so we can match by name+type.
-  const destExisting = await listPolicies(dst.client, dst.tenantId);
+  // List both tenants' policies once, so each source policy pairs with the
+  // destination policy the Policies page and Compare pair it with.
+  const [sourceExisting, destExisting] = await Promise.all([
+    listPolicies(src.client, src.tenantId),
+    listPolicies(dst.client, dst.tenantId),
+  ]);
 
   // Website tags available in the destination (from its local-site list),
   // fetched at most once per run. Web-control policies reference these tags by
@@ -118,9 +123,7 @@ export async function migratePolicies(
     }
     const sourcePolicy = got;
 
-    const match = destExisting.find(
-      (p) => p.name === sourcePolicy.name && p.type === sourcePolicy.type,
-    );
+    const match = pairPolicy(sourcePolicy, sourceExisting, destExisting).dest;
 
     if (match && !req.overwrite) {
       results[i] = {

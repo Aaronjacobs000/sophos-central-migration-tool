@@ -15,6 +15,7 @@ import {
 } from "../sophos/api/exclusions.js";
 import { listProfiles } from "../sophos/api/web-filters.js";
 import { diff, summarize } from "../compare/json-diff.js";
+import { pairPolicy } from "../compare/policy-pairing.js";
 import { log } from "../log.js";
 import {
   WEB_PROFILE_ID_SUFFIX,
@@ -66,8 +67,8 @@ const DEEP_MATCH_CONCURRENCY = 5;
 compareRouter.use("/compare", requireConfigured);
 
 /**
- * GET /api/compare/policies — list-level diff: which policy names+types
- * exist on source only, dest only, or both.
+ * GET /api/compare/policies — list-level diff: which policies exist on source
+ * only, dest only, or both, paired by pairPolicy().
  */
 compareRouter.get("/compare/policies", async (_req, res, next) => {
   try {
@@ -78,22 +79,18 @@ compareRouter.get("/compare/policies", async (_req, res, next) => {
       listPolicies(dst.client, dst.tenantId),
     ]);
 
-    const key = (p: SophosPolicy) => `${p.type}::${p.name}`;
-    const sMap = new Map(s.map((p) => [key(p), p]));
-    const dMap = new Map(d.map((p) => [key(p), p]));
-
     const sourceOnly: SophosPolicy[] = [];
-    const destOnly: SophosPolicy[] = [];
     const both: Array<{ source: SophosPolicy; dest: SophosPolicy }> = [];
+    const pairedDestIds = new Set<string>();
 
-    for (const [k, sp] of sMap) {
-      const dp = dMap.get(k);
-      if (dp) both.push({ source: sp, dest: dp });
-      else sourceOnly.push(sp);
+    for (const sp of s) {
+      const dp = pairPolicy(sp, s, d).dest;
+      if (dp) {
+        both.push({ source: sp, dest: dp });
+        pairedDestIds.add(dp.id);
+      } else sourceOnly.push(sp);
     }
-    for (const [k, dp] of dMap) {
-      if (!sMap.has(k)) destOnly.push(dp);
-    }
+    const destOnly = d.filter((dp) => !pairedDestIds.has(dp.id));
 
     res.json({ sourceOnly, destOnly, both });
   } catch (err) {
@@ -103,8 +100,8 @@ compareRouter.get("/compare/policies", async (_req, res, next) => {
 
 /**
  * GET /api/compare/policies/:sourceId/:destId? — deep diff between two
- * policies' settings. If destId is omitted, attempts to find a destination
- * policy with the same name+type.
+ * policies' settings. If destId is omitted, the destination policy is the one
+ * pairPolicy() pairs the source policy with.
  *
  * IMPORTANT: this route MUST be registered AFTER any other static
  * "/compare/policies/<literal>" routes (e.g. /deep), otherwise Express will
@@ -128,14 +125,15 @@ compareRouter.get("/compare/policies/:sourceId/:destId?", async (req, res, next)
     const sourcePolicy = await getPolicy(src.client, src.tenantId, req.params.sourceId!);
 
     let destPolicy: SophosPolicy | null = null;
+    let ambiguous = false;
     if (req.params.destId) {
       destPolicy = await getPolicy(dst.client, dst.tenantId, req.params.destId);
     } else {
-      const destList = await listPolicies(dst.client, dst.tenantId);
-      destPolicy =
-        destList.find(
-          (p) => p.name === sourcePolicy.name && p.type === sourcePolicy.type,
-        ) ?? null;
+      const [sourceList, destList] = await Promise.all([
+        listPolicies(src.client, src.tenantId),
+        listPolicies(dst.client, dst.tenantId),
+      ]);
+      ({ dest: destPolicy, ambiguous } = pairPolicy(sourcePolicy, sourceList, destList));
     }
 
     if (!destPolicy) {
@@ -144,7 +142,10 @@ compareRouter.get("/compare/policies/:sourceId/:destId?", async (req, res, next)
         destPolicy: null,
         changes: [],
         summary: { added: 0, removed: 0, changed: 0 },
-        note: "no matching destination policy found",
+        note: ambiguous
+          ? "more than one policy matches this name ignoring case, so none is paired"
+          : "no matching destination policy found",
+        ambiguous,
       });
       return;
     }
@@ -228,7 +229,7 @@ compareRouter.get("/compare/exclusions", async (_req, res, next) => {
 /**
  * GET /api/compare/policies/deep
  *
- * For every (source policy, dest policy) pair that matches by name+type,
+ * For every (source policy, dest policy) pair that pairPolicy() makes,
  * fetches the full settings on both sides and deep-diffs them. Returns a
  * per-policy match status. Cached in memory keyed by the source/dest tenant
  * IDs and invalidated when credentials change.
@@ -290,17 +291,15 @@ export async function computeDeepMatch(): Promise<DeepPolicyMatchResult> {
     listPolicies(dst.client, dst.tenantId),
   ]);
 
-  const key = (p: SophosPolicy) => `${p.type}::${p.name}`;
-  const sMap = new Map(sList.map((p) => [key(p), p]));
-  const dMap = new Map(dList.map((p) => [key(p), p]));
-
   const matches: DeepPolicyMatch[] = [];
   const matchedPairs: Array<{ src: SophosPolicy; dst: SophosPolicy }> = [];
+  const pairedDestIds = new Set<string>();
 
-  for (const [k, sPolicy] of sMap) {
-    const dPolicy = dMap.get(k);
+  for (const sPolicy of sList) {
+    const dPolicy = pairPolicy(sPolicy, sList, dList).dest;
     if (dPolicy) {
       matchedPairs.push({ src: sPolicy, dst: dPolicy });
+      pairedDestIds.add(dPolicy.id);
     } else {
       matches.push({
         type: sPolicy.type,
@@ -312,8 +311,8 @@ export async function computeDeepMatch(): Promise<DeepPolicyMatchResult> {
       });
     }
   }
-  for (const [k, dPolicy] of dMap) {
-    if (!sMap.has(k)) {
+  for (const dPolicy of dList) {
+    if (!pairedDestIds.has(dPolicy.id)) {
       matches.push({
         type: dPolicy.type,
         name: dPolicy.name,

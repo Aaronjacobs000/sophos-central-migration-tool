@@ -12,6 +12,8 @@ import { toast } from "./toast.js";
 const state = {
   sourcePolicy: null,
   destPolicy: null,
+  // More than one policy matched the name ignoring case, so none was paired.
+  ambiguous: false,
   entries: [],
   showOnlyDiffs: true,
   filter: "",
@@ -35,6 +37,7 @@ async function boot() {
     const res = await api.get(url);
     state.sourcePolicy = res.sourcePolicy;
     state.destPolicy = res.destPolicy;
+    state.ambiguous = !!res.ambiguous;
     // The server's copy of the settings names web profiles instead of each tenant's ID for them.
     state.entries = flattenForCompare(
       res.settings?.source ?? res.sourcePolicy?.settings ?? {},
@@ -52,7 +55,7 @@ async function boot() {
 function renderHeader() {
   const lead = state.destPolicy
     ? `Comparing <strong>${escapeHtml(state.sourcePolicy.name)}</strong> on the source and the destination.`
-    : `Source policy <strong>${escapeHtml(state.sourcePolicy.name)}</strong> has no matching destination policy.`;
+    : `Source policy <strong>${escapeHtml(state.sourcePolicy.name)}</strong> has no matching destination policy.${state.ambiguous ? " More than one policy matches its name ignoring case, so none is paired." : ""}`;
   document.getElementById("page-lead").innerHTML = lead;
 
   const summary = summarizeEntries(state.entries);
@@ -71,7 +74,7 @@ function renderHeader() {
         <h2 class="compare-title">${escapeHtml(state.sourcePolicy.name)}</h2>
         <div class="compare-meta-row">
           <code>${escapeHtml(state.sourcePolicy.type)}</code>
-          ${state.destPolicy ? `<span class="hint">Matched by name and type</span>` : `<span class="tag tag-src">No destination match</span>`}
+          ${state.destPolicy ? `<span class="hint">${matchedBy()}</span>` : `<span class="tag tag-src">No destination match</span>`}
         </div>
       </div>
       <button id="clone-btn" class="btn btn-primary">${escapeHtml(cloneLabel)}</button>
@@ -86,6 +89,13 @@ function renderHeader() {
   if (state.destPolicy) {
     document.getElementById("compare-card").hidden = false;
   }
+}
+
+/** How the destination policy was paired: by the same name, or the one name that matches ignoring case. */
+function matchedBy() {
+  return state.destPolicy.name === state.sourcePolicy.name
+    ? "Matched by name and type"
+    : `Matched by type and by name ignoring case: <strong>${escapeHtml(state.destPolicy.name)}</strong> on the destination`;
 }
 
 function renderMetadataRows() {
@@ -164,7 +174,11 @@ async function cloneToDest() {
   const verb = state.destPolicy
     ? "overwrite the destination policy with source"
     : "clone this policy to the bottom of the destination's priority order";
-  if (!confirm(`Are you sure you want to ${verb}?`)) return;
+  // An overwrite sends the source's name too, so a policy paired ignoring case takes the source's name.
+  const rename = state.destPolicy && state.destPolicy.name !== state.sourcePolicy.name
+    ? `\n\nThe destination policy "${state.destPolicy.name}" is renamed "${state.sourcePolicy.name}".`
+    : "";
+  if (!confirm(`Are you sure you want to ${verb}?${rename}`)) return;
   try {
     const res = await api.post("/api/migrate/policies", {
       policyIds: [state.sourcePolicy.id],

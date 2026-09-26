@@ -5,6 +5,7 @@ import { getCachedSection, refreshSection } from "./preload-client.js";
 import { makeSortable } from "./sortable.js";
 import { icon } from "./icons.js";
 import { rowMenu, wireRowMenus, stackBar, onDestCell, ON_DEST_HEADER, plural, resultsModal, outcomeOf, countOutcomes } from "./ui.js";
+import { pairPolicy } from "./policy-pairing.js";
 
 // Friendly labels for known Sophos endpoint policy types. Anything not in
 // this map falls back to title-casing the raw type slug.
@@ -51,9 +52,10 @@ const state = {
   selectedSource: new Set(),
   filter: "",
   hideMatching: false,
-  // Deep match data, keyed by `${type}::${name}` (case-sensitive)
+  // Deep match data, keyed by `source:${id}` and `dest:${id}`
   // Values: { status: "match"|"differ"|"source-only"|"dest-only", diffCount }
-  matchByKey: new Map(),
+  matchById: new Map(),
+  matchTotal: 0,
   matchStatus: "idle", // "idle" | "loading" | "ready" | "error"
   matchError: null,
 };
@@ -101,9 +103,11 @@ async function loadDeepMatch(forceRefresh = false) {
     const res = await api.get(url);
     const map = new Map();
     for (const m of res.matches || []) {
-      map.set(`${m.type}::${m.name}`, m);
+      if (m.sourceId) map.set(`source:${m.sourceId}`, m);
+      if (m.destId) map.set(`dest:${m.destId}`, m);
     }
-    state.matchByKey = map;
+    state.matchById = map;
+    state.matchTotal = (res.matches || []).length;
     state.matchStatus = "ready";
     updateToggleState();
     render();
@@ -121,7 +125,7 @@ function updateToggleState() {
 
   if (state.matchStatus === "ready") {
     toggle.disabled = false;
-    const total = state.matchByKey.size;
+    const total = state.matchTotal;
     note.textContent = `Deep match ready, ${total} policies compared`;
     note.className = "hint";
   } else if (state.matchStatus === "loading") {
@@ -256,36 +260,36 @@ function titleCase(slug) {
 }
 
 /**
- * Look up the deep match record for a given policy. Returns null if the
- * deep match isn't ready yet or this policy isn't in the result.
+ * Look up the deep match record for a policy on one side ("source" or
+ * "dest"). Returns null if the deep match isn't ready yet or this policy
+ * isn't in the result.
  */
-function lookupMatch(policy) {
+function lookupMatch(policy, side) {
   if (state.matchStatus !== "ready") return null;
-  return state.matchByKey.get(`${policy.type}::${policy.name}`) ?? null;
+  return state.matchById.get(`${side}:${policy.id}`) ?? null;
+}
+
+/** The deep match records for a product's policies on both sides. */
+function productMatches(srcList, dstList) {
+  return [
+    ...srcList.map((p) => lookupMatch(p, "source")),
+    ...dstList.map((p) => lookupMatch(p, "dest")),
+  ];
 }
 
 /**
  * Determine whether a product section is "all matching" by deep comparison.
- * Returns true ONLY when:
- *   - source and dest have exactly the same set of policy (type,name) keys
- *   - every paired policy has status === "match" (zero deep diffs)
+ * Returns true ONLY when every policy on both sides is paired and its pair
+ * has status === "match" (zero deep diffs).
  * If the deep match isn't ready, falls back to never hiding (safest).
  */
-function productAllMatch(type, srcList, dstList) {
+function productAllMatch(srcList, dstList) {
   if (state.matchStatus !== "ready") return false;
-  const srcKeys = new Set(srcList.map((p) => p.name));
-  const dstKeys = new Set(dstList.map((p) => p.name));
-  if (srcKeys.size !== dstKeys.size) return false;
-  for (const k of srcKeys) {
-    if (!dstKeys.has(k)) return false;
-  }
-  // Every name-paired policy must have a "match" status
-  for (const p of srcList) {
-    const m = state.matchByKey.get(`${type}::${p.name}`);
-    if (!m || m.status !== "match") return false;
-  }
-  return true;
+  return productMatches(srcList, dstList).every((m) => m?.status === "match");
 }
+
+/** Shown on a source policy whose name matches more than one policy ignoring case. */
+const AMBIGUOUS_TAG = `<span class="tag tag-warn" title="More than one policy matches this name ignoring case, so it is not paired with any destination policy">ambiguous name</span>`;
 
 function renderProductSection(type, srcList, dstList) {
   const q = state.filter.toLowerCase();
@@ -295,23 +299,25 @@ function renderProductSection(type, srcList, dstList) {
 
   if (q && srcFiltered.length === 0 && dstFiltered.length === 0) return null;
 
-  if (state.hideMatching && productAllMatch(type, srcList, dstList)) {
+  if (state.hideMatching && productAllMatch(srcList, dstList)) {
     return null;
   }
 
-  const srcNames = new Set(srcList.map((p) => p.name.toLowerCase()));
-  const dstNames = new Set(dstList.map((p) => p.name.toLowerCase()));
+  // Each source policy's destination policy, paired as the deep match, Compare and clone pair them.
+  const pairing = new Map(srcList.map((p) => [p.id, pairPolicy(p, srcList, dstList)]));
+  const pairedDestIds = new Set([...pairing.values()].map((x) => x.dest?.id).filter(Boolean));
 
   const label = productLabel(type);
 
   // Per-product summary from the deep match, when it is ready.
-  const productStats = computeProductStats(type, srcList, dstList);
+  const productStats = computeProductStats(srcList, dstList);
   const productBadge = renderProductBadge(productStats);
 
   const renderSrcRow = (p) => {
-    const inDest = dstNames.has(p.name.toLowerCase());
+    const { dest, ambiguous } = pairing.get(p.id);
+    const inDest = !!dest;
     const checked = state.selectedSource.has(p.id) ? "checked" : "";
-    const matchInfo = lookupMatch(p);
+    const matchInfo = lookupMatch(p, "source");
     const statusBadge = renderStatusBadge(matchInfo, inDest);
     const action = inDest
       ? `<button class="btn btn-small" data-compare="${escapeAttr(p.id)}">Compare</button>`
@@ -323,6 +329,7 @@ function renderProductSection(type, srcList, dstList) {
         <td class="cell-name">
           <a href="/policy-detail.html?side=source&id=${encodeURIComponent(p.id)}">${escapeHtml(p.name)}</a>
           ${statusBadge}
+          ${ambiguous ? AMBIGUOUS_TAG : ""}
         </td>
         <td class="cell-state">${enabledCell(p)}</td>
         <td class="col-actions">${action}</td>
@@ -330,8 +337,8 @@ function renderProductSection(type, srcList, dstList) {
   };
 
   const renderDstRow = (p) => {
-    const inSource = srcNames.has(p.name.toLowerCase());
-    const matchInfo = lookupMatch(p);
+    const inSource = pairedDestIds.has(p.id);
+    const matchInfo = lookupMatch(p, "dest");
     const statusBadge = renderStatusBadge(matchInfo, inSource, "dest");
     const menu = rowMenu([
       { label: "Delete from destination", icon: "trash", danger: true, attrs: `data-delete-dest="${escapeAttr(p.id)}" data-name="${escapeAttr(p.name)}"` },
@@ -396,26 +403,19 @@ function enabledCell(p) {
     : `<span class="hint">On</span>`;
 }
 
-function computeProductStats(type, srcList, dstList) {
+function computeProductStats(srcList, dstList) {
   if (state.matchStatus !== "ready") return null;
   const stats = { match: 0, differ: 0, sourceOnly: 0, destOnly: 0, total: 0 };
+  // A pair's record is found from both sides; count it once.
   const seen = new Set();
-  for (const p of srcList) {
-    const m = state.matchByKey.get(`${type}::${p.name}`);
-    if (!m) continue;
-    seen.add(`${type}::${p.name}`);
+  for (const m of productMatches(srcList, dstList)) {
+    if (!m || seen.has(m)) continue;
+    seen.add(m);
     stats.total++;
     if (m.status === "match") stats.match++;
     else if (m.status === "differ") stats.differ++;
     else if (m.status === "source-only") stats.sourceOnly++;
-  }
-  for (const p of dstList) {
-    const k = `${type}::${p.name}`;
-    if (seen.has(k)) continue;
-    const m = state.matchByKey.get(k);
-    if (!m) continue;
-    stats.total++;
-    if (m.status === "dest-only") stats.destOnly++;
+    else if (m.status === "dest-only") stats.destOnly++;
   }
   return stats;
 }
