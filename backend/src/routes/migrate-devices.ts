@@ -156,19 +156,22 @@ migrateDevicesRouter.get("/migrate/devices/jobs/all", async (_req, res, next) =>
       });
     }
 
-    // 2. Add API-only jobs from the source tenant
-    for (const aj of srcApiJobs) {
-      if (coveredApiIds.has(aj.id)) continue;
-      coveredApiIds.add(aj.id);
-      merged.push(apiJobToMerged(aj, "source", src?.summary.displayName));
-    }
-
-    // 3. Add API-only jobs from the dest tenant
-    for (const aj of dstApiJobs) {
-      if (coveredApiIds.has(aj.id)) continue;
-      coveredApiIds.add(aj.id);
-      merged.push(apiJobToMerged(aj, "dest", dst?.summary.displayName));
-    }
+    // 2. API-only jobs from both tenants. Sophos gives both tenants the same
+    // job ID, so a job on both is listed once, by its sending side when there
+    // is one: the sending tenant knows the job only once the move has started.
+    const apiOnly = new Map<string, MergedMigrationJob>();
+    const sending = (j: MergedMigrationJob) => /^send/i.test(j.apiJobMode ?? "");
+    const addApiJobs = (jobs: SophosMigrationJob[], tenant: "source" | "dest", name: string | null | undefined) => {
+      for (const aj of jobs) {
+        if (coveredApiIds.has(aj.id)) continue;
+        const entry = apiJobToMerged(aj, tenant, name);
+        const known = apiOnly.get(aj.id);
+        if (!known || (!sending(known) && sending(entry))) apiOnly.set(aj.id, entry);
+      }
+    };
+    addApiJobs(srcApiJobs, "source", src?.summary.displayName);
+    addApiJobs(dstApiJobs, "dest", dst?.summary.displayName);
+    merged.push(...apiOnly.values());
 
     // Sort newest first
     merged.sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
