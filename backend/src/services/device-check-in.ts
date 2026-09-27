@@ -7,6 +7,12 @@
  * only arrives when it next checks in, which took 23 to 25 minutes on both moves
  * measured on 26/09/2026; lastSeenAt then moves past registeredAt.
  *
+ * Sophos records no check-in time. While a device is online its lastSeenAt is
+ * the time of the request (measured 27/09/2026), so the lastSeenAt the tool
+ * reads when it first finds the device checked in is the time of that check,
+ * not of the check-in. The tool therefore also keeps the last check that
+ * found the device still waiting: the check-in came between the two.
+ *
  * Records are matched by newId only, never by hostname: the receiving tenant
  * can hold older offline records with the same hostname (a device that moved
  * away and back leaves one behind).
@@ -47,6 +53,8 @@ export function checkInFor(
   moved: MigrationEndpointStatus | undefined,
   records: ReceivedRecord[],
   previous?: DeviceCheckIn,
+  /** When the records were read; a record read still waiting sets stillWaitingAt to this. */
+  readAt?: string,
 ): DeviceCheckIn {
   if (previous?.state === "checked-in") return previous;
   // Without the job's answer (the call failed, or Sophos no longer returns an
@@ -61,15 +69,37 @@ export function checkInFor(
 
   const newId = moved.newId ?? previous?.newId;
   const handedOverAt = moved.migratedAt ?? previous?.handedOverAt;
-  const waiting: DeviceCheckIn = { state: "waiting", newId, handedOverAt };
+  const stillWaitingAt = previous?.stillWaitingAt;
+  const waiting: DeviceCheckIn = { state: "waiting", newId, handedOverAt, ...(stillWaitingAt ? { stillWaitingAt } : {}) };
   const record = newId ? records.find((r) => r.id === newId) : undefined;
   if (!record?.lastSeenAt) return waiting;
   const registered = Date.parse(record.registeredAt ?? handedOverAt ?? "");
   const seen = Date.parse(record.lastSeenAt);
   if (!Number.isFinite(registered) || !Number.isFinite(seen) || seen - registered <= CHECK_IN_MARGIN_MS) {
-    return waiting;
+    // Read, and not checked in yet: the check-in comes after this read.
+    return readAt ? { ...waiting, stillWaitingAt: readAt } : waiting;
   }
-  return { state: "checked-in", newId, handedOverAt, checkedInAt: record.lastSeenAt };
+  return { state: "checked-in", newId, handedOverAt, checkedInAt: record.lastSeenAt, ...(stillWaitingAt ? { stillWaitingAt } : {}) };
+}
+
+/**
+ * How far apart the last check that found a device waiting and the first
+ * that found it checked in can be for the second to stand as its check-in
+ * time. The job page checks every 30 seconds while devices wait.
+ */
+export const CHECK_IN_EXACT_MS = 2 * 60_000;
+
+/**
+ * A checked-in device's check-in time, as far as the tool knows it: after
+ * `after` (the last check that found it waiting, or the handover) and by
+ * `at`. `exact` is true when the two are close enough for `at` to stand as
+ * the check-in time; otherwise `at` is only when the tool first saw it.
+ */
+export function checkInWindow(c: DeviceCheckIn): { at: string; after?: string; exact: boolean } | null {
+  if (c.state !== "checked-in" || !c.checkedInAt) return null;
+  const after = c.stillWaitingAt ?? c.handedOverAt;
+  const gap = Date.parse(c.checkedInAt) - Date.parse(after ?? "");
+  return { at: c.checkedInAt, ...(after ? { after } : {}), exact: Number.isFinite(gap) && gap <= CHECK_IN_EXACT_MS };
 }
 
 /**
@@ -113,6 +143,8 @@ export async function refreshCheckIns(
   const records: ReceivedRecord[] = [];
   let error: string | undefined;
   const ids = [...wanted];
+  // Taken before the lookup, so a device read as waiting had not checked in by then.
+  const readAt = new Date().toISOString();
   try {
     for (let i = 0; i < ids.length; i += ID_BATCH) {
       records.push(...(await listAllEndpoints(to.client, to.tenantId, { ids: ids.slice(i, i + ID_BATCH) })));
@@ -122,7 +154,7 @@ export async function refreshCheckIns(
   }
 
   const checkIns: Record<string, DeviceCheckIn> = {};
-  for (const id of job.endpointIds) checkIns[id] = checkInFor(byId.get(id), records, previous[id]);
+  for (const id of job.endpointIds) checkIns[id] = checkInFor(byId.get(id), records, previous[id], error ? undefined : readAt);
   return { checkIns, error };
 }
 

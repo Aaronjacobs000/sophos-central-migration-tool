@@ -13,7 +13,7 @@
  * ends completed with failures (some arrived) or failed (none did).
  */
 
-import { checkInFor, mergeEndpointStatuses } from "./device-check-in.js";
+import { checkInFor, checkInWindow, mergeEndpointStatuses } from "./device-check-in.js";
 import type { JobStatus, LocalMigrationJob } from "./migration-store.js";
 import type { MigrationEndpointStatus } from "../sophos/api/migrations.js";
 
@@ -25,7 +25,16 @@ export interface DeviceProgress {
   state: DeviceState;
   newId?: string;
   handedOverAt?: string;
+  /** When the tool first saw the device checked in; the check-in came by then. */
   checkedInAt?: string;
+  /** The check-in came after this: the last check that found the device waiting, or the handover. */
+  checkedInAfter?: string;
+  /**
+   * True when checkedInAt is within a couple of checks of the check-in, so it
+   * stands as the check-in time; false when the tool was not checking at the
+   * time and checkedInAt is only when it first saw the device checked in.
+   */
+  checkInTimeExact?: boolean;
   /** Why Sophos failed the device, when it said. */
   reason?: string;
   /** The device's group on the sending tenant when the job was created. */
@@ -87,8 +96,10 @@ export function jobProgress(job: LocalMigrationJob, now: number = Date.now()): J
       group: job.endpointGroups ? (job.endpointGroups[id]?.name ?? null) : undefined,
     };
     switch (c.state) {
-      case "checked-in":
-        return { ...base, state: "arrived", checkedInAt: c.checkedInAt };
+      case "checked-in": {
+        const w = checkInWindow(c);
+        return { ...base, state: "arrived", checkedInAt: c.checkedInAt, ...(w?.after ? { checkedInAfter: w.after } : {}), checkInTimeExact: w?.exact ?? false };
+      }
       case "move-failed":
         return { ...base, state: "failed", reason: entry?.reason ?? (entry as { errorMessage?: string } | undefined)?.errorMessage };
       case "waiting":

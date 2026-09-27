@@ -43,10 +43,16 @@ export interface DeviceCheckIn {
   handedOverAt?: string;
   /**
    * The device's last-seen time when the tool first found it checked in. The
-   * device had checked in by then; with the job page open during the move it is
-   * within one poll of the first check-in.
+   * device had checked in by then. Sophos records no check-in time, and an
+   * online device's last-seen time is the time of the check, so this is when
+   * the tool first saw it checked in.
    */
   checkedInAt?: string;
+  /**
+   * The last check that read the device's new record and found it had not
+   * checked in yet. The check-in came after this and by checkedInAt.
+   */
+  stillWaitingAt?: string;
 }
 
 /**

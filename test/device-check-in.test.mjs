@@ -8,7 +8,8 @@ import { bootApp } from "./helpers/app.mjs";
 
 const fake = createFakeSophos();
 const { root } = await bootApp(fake);
-const { checkInFor, awaitingCheckIn, CHECK_IN_MARGIN_MS } = await import("../backend/dist/services/device-check-in.js");
+const { checkInFor, checkInWindow, awaitingCheckIn, CHECK_IN_MARGIN_MS, CHECK_IN_EXACT_MS } = await import("../backend/dist/services/device-check-in.js");
+const { jobProgress } = await import("../backend/dist/services/job-progress.js");
 const { pollJob } = await import("../backend/dist/services/device-migrator.js");
 const { getJob } = await import("../backend/dist/services/migration-store.js");
 
@@ -42,6 +43,51 @@ test("a stale record with the same hostname is never matched", () => {
   assert.equal(c.state, "checked-in");
   assert.equal(c.newId, NEW);
   assert.equal(c.checkedInAt, at(25));
+});
+
+test("a read that finds the record still waiting is kept, so the check-in is known to come after it", () => {
+  // Read at 10 minutes and still waiting: the tool knows the device had not checked in by then.
+  const w = checkInFor(handedOver, [registered], undefined, at(10));
+  assert.deepEqual(w, { state: "waiting", newId: NEW, handedOverAt: at(0.1), stillWaitingAt: at(10) });
+  // A later read that does not return the record (or a failed lookup, which passes no read time) keeps it.
+  assert.equal(checkInFor(handedOver, [], w, at(11)).stillWaitingAt, at(10));
+  assert.equal(checkInFor(handedOver, [registered], w).stillWaitingAt, at(10));
+  // Still waiting at 24.5, checked in by 24.8: both are kept.
+  const w2 = checkInFor(handedOver, [registered], w, at(24.5));
+  const c = checkInFor(handedOver, [{ ...registered, lastSeenAt: at(24.8) }], w2, at(24.8));
+  assert.deepEqual(c, { state: "checked-in", newId: NEW, handedOverAt: at(0.1), checkedInAt: at(24.8), stillWaitingAt: at(24.5) });
+});
+
+test("the check-in time stands when the tool saw the device waiting shortly before, and is only first seen otherwise", () => {
+  const arrived = (stillWaitingAt, checkedInAt) => ({ state: "checked-in", newId: NEW, handedOverAt: at(0.1), checkedInAt, ...(stillWaitingAt ? { stillWaitingAt } : {}) });
+  // The job page was open: waiting at 24.3, checked in at 24.8.
+  assert.deepEqual(checkInWindow(arrived(at(24.3), at(24.8))), { at: at(24.8), after: at(24.3), exact: true });
+  assert.equal(checkInWindow(arrived(at(22.8), at(24.8))).exact, true, "two minutes apart");
+  assert.equal(checkInWindow(arrived(at(22.7), at(24.8))).exact, false, "just over two minutes");
+  assert.equal(CHECK_IN_EXACT_MS, 120_000);
+  // Seen 27/09 11:49 after the last check at 26/09 16:30 (the 27/09 live test): only when the tool first saw it.
+  const late = arrived("2026-09-26T06:30:00.000Z", "2026-09-27T01:49:43.994Z");
+  assert.deepEqual(checkInWindow(late), { at: "2026-09-27T01:49:43.994Z", after: "2026-09-26T06:30:00.000Z", exact: false });
+  // Never seen waiting: the handover is the lower bound.
+  assert.deepEqual(checkInWindow(arrived(undefined, at(1))), { at: at(1), after: at(0.1), exact: true });
+  assert.equal(checkInWindow(arrived(undefined, at(24.8))).exact, false);
+  assert.equal(checkInWindow({ state: "waiting", newId: NEW }), null);
+});
+
+test("the job's progress says, per device, whether its check-in time stands or is only first seen", () => {
+  const job = (checkIn) => ({
+    localJobId: "p", jobName: "p", createdAt: at(0), direction: "source-to-dest", sourceMigrationId: "j", destMigrationId: "j",
+    endpointIds: [OLD], endpointHostnames: { [OLD]: "WIN10" }, status: "in-progress", sourceSnapshot: null, destSnapshot: null,
+    checkIns: { [OLD]: checkIn },
+  });
+  const [open] = jobProgress(job({ state: "checked-in", newId: NEW, handedOverAt: at(0.1), checkedInAt: at(24.8), stillWaitingAt: at(24.3) }), Date.parse(at(30))).devices;
+  assert.equal(open.state, "arrived");
+  assert.equal(open.checkedInAt, at(24.8));
+  assert.equal(open.checkedInAfter, at(24.3));
+  assert.equal(open.checkInTimeExact, true);
+  const [closed] = jobProgress(job({ state: "checked-in", newId: NEW, handedOverAt: at(0.1), checkedInAt: at(24.8) }), Date.parse(at(30))).devices;
+  assert.equal(closed.checkedInAfter, at(0.1));
+  assert.equal(closed.checkInTimeExact, false, "saved by an earlier build, or the page was not open");
 });
 
 test("not handed over, failed, and a saved check-in that later polls do not move", () => {
@@ -80,9 +126,12 @@ test("the job stays open, waiting for check-in, after the API reports the handov
   jobEndpoints = [handedOver];
   destRecords = [stale, registered];
   fake.reset();
+  const before = Date.now();
   const job = await pollJob("local-1");
   assert.equal(job.status, "requested", "handed over is not arrived: the job stays requested until a device checks in");
-  assert.deepEqual(job.checkIns[OLD], { state: "waiting", newId: NEW, handedOverAt: at(0.1) });
+  const { stillWaitingAt, ...waiting } = job.checkIns[OLD];
+  assert.deepEqual(waiting, { state: "waiting", newId: NEW, handedOverAt: at(0.1) });
+  assert.ok(Date.parse(stillWaitingAt) >= before - 1000 && Date.parse(stillWaitingAt) <= Date.now(), "the time of this check's read");
   assert.equal(awaitingCheckIn(job), true, "the live stream keeps polling");
   const [lookup] = endpointLookups();
   assert.equal(lookup.tenant, "dst", "the receiving tenant is read");
@@ -92,8 +141,9 @@ test("the job stays open, waiting for check-in, after the API reports the handov
 
 test("the check-in is recorded once, with its time and the new ID, and not looked up again", async () => {
   destRecords = [stale, { ...registered, lastSeenAt: at(24.8) }];
+  const stillWaitingAt = (await getJob("local-1")).checkIns[OLD].stillWaitingAt;
   const job = await pollJob("local-1");
-  assert.deepEqual(job.checkIns[OLD], { state: "checked-in", newId: NEW, handedOverAt: at(0.1), checkedInAt: at(24.8) });
+  assert.deepEqual(job.checkIns[OLD], { state: "checked-in", newId: NEW, handedOverAt: at(0.1), checkedInAt: at(24.8), stillWaitingAt });
   assert.equal(awaitingCheckIn(job), false);
   assert.deepEqual((await getJob("local-1")).checkIns, job.checkIns, "saved with the job");
 
@@ -124,6 +174,22 @@ test("the job page shows each device's check-in and does not call a waiting job 
   // One row per device from the server's progress, which counts a device arrived only once it has checked in.
   assert.match(js, /job\.progress\.devices/);
   assert.match(js, /Waiting for check-in/);
-  assert.match(js, /checked in by/);
+  assert.match(js, /first seen checked in/);
+  assert.doesNotMatch(js, /checked in by \$\{/, "no bare time that reads as the check-in when the tool was not watching");
   assert.match(js, /setHtml\("job-status", statusTag\(job\.status/);
+});
+
+test("the job page labels a check-in time it only first saw as first seen, and gives the window on hover", async () => {
+  const js = await readFile(new URL("../frontend/js/page-migrate-job-detail.js", import.meta.url), "utf8");
+  const src = js.slice(js.indexOf("function checkInTime"), js.indexOf("function renderDetails"));
+  const checkInTime = new Function("formatWhen", "esc", "escAttr", `${src}; return checkInTime;`)((iso) => `T(${iso})`, String, String);
+  assert.equal(
+    checkInTime({ checkedInAt: "b", checkedInAfter: "a", checkInTimeExact: true }),
+    `<span class="lane-time" title="Sophos does not record when a device checks in. The tool saw it waiting at T(a) and checked in at T(b).">checked in T(b)</span>`,
+  );
+  assert.equal(
+    checkInTime({ checkedInAt: "b", checkedInAfter: "a", checkInTimeExact: false }),
+    `<span class="lane-time" title="Sophos does not record when a device checks in, and the tool was not checking at the time. It checked in after T(a) and by T(b).">first seen checked in T(b)</span>`,
+  );
+  assert.match(checkInTime({ checkedInAt: "b", checkInTimeExact: false }), /It checked in by T\(b\)\.">first seen checked in T\(b\)</);
 });

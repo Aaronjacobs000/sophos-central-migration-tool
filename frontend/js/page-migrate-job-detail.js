@@ -368,7 +368,7 @@ function laneRow(d) {
         <span class="lane-host">${esc(d.hostname)}</span>
         <span class="lane-sub">${newId}</span>
       </div>
-      <span class="lane-end"><span class="tag tag-ok">${icon("check")}Arrived</span><span class="lane-time">checked in by ${esc(formatWhen(d.checkedInAt))}</span></span>`;
+      <span class="lane-end"><span class="tag tag-ok">${icon("check")}Arrived</span>${checkInTime(d)}</span>`;
   } else if (d.state === "waiting") {
     const since = d.handedOverAt ? `<span class="lane-time">waiting <b data-wait-since="${escAttr(d.handedOverAt)}">${esc(formatWait(Date.now() - Date.parse(d.handedOverAt)))}</b></span>` : "";
     to = `
@@ -396,6 +396,21 @@ function laneRow(d) {
     </div>
     <div class="lane-link" aria-hidden="true"><span class="lane-track"></span>${d.state === "waiting" ? `<span class="lane-pulse"></span>` : ""}${mark ? `<span class="lane-mark">${mark}</span>` : ""}</div>
     <div class="lane-cell lane-to">${to}</div>`;
+}
+
+/**
+ * A device's check-in time. Sophos records none, so the tool knows the check-in
+ * came between its last check that found the device waiting and its first that
+ * found it checked in. Close together (the page was open), the second is the
+ * check-in time; far apart, it is only when the tool first saw it.
+ */
+function checkInTime(d) {
+  const after = d.checkedInAfter ? formatWhen(d.checkedInAfter) : "";
+  const title = d.checkInTimeExact
+    ? `Sophos does not record when a device checks in. The tool saw it waiting${after ? ` at ${after}` : ""} and checked in at ${formatWhen(d.checkedInAt)}.`
+    : `Sophos does not record when a device checks in, and the tool was not checking at the time. It checked in${after ? ` after ${after} and` : ""} by ${formatWhen(d.checkedInAt)}.`;
+  const label = d.checkInTimeExact ? "checked in" : "first seen checked in";
+  return `<span class="lane-time" title="${escAttr(title)}">${label} ${esc(formatWhen(d.checkedInAt))}</span>`;
 }
 
 function renderDetails(job) {
