@@ -205,7 +205,7 @@ function wireForm(ids) {
       if (err.body?.preflightFailures) {
         showFailures(err.body.preflightFailures);
       } else {
-        showResult("err", migrationErrorHint(err.message || "Dry run failed"));
+        showResult("err", migrationErrorHint(err, "Dry run failed"));
       }
     }
   });
@@ -230,7 +230,7 @@ function wireForm(ids) {
       if (err.body?.preflightFailures) {
         showFailures(err.body.preflightFailures);
       } else {
-        showResult("err", migrationErrorHint(err.message || "Migration start failed"));
+        showResult("err", migrationErrorHint(err, "Migration start failed"));
       }
     }
   });
@@ -278,10 +278,18 @@ function showFailures(failures) {
     </div>`;
 }
 
-function migrationErrorHint(msg) {
-  const m = String(msg);
-  if (/migration is not enabled/i.test(m) || (/403/.test(m) && /migration/i.test(m))) {
-    return `${escapeHtml(m)}<br/><br/><strong>Fix:</strong> In Sophos Fusion on the <strong>sending</strong> tenant, go to <strong>Overview &gt; Global Settings &gt; Device Migration</strong> and turn on <strong>Allow device migration</strong>. Then retry.`;
+/**
+ * A failed start or dry run, with a fix only where the error says what it is.
+ * Device Migration being off or expired is reported by the server as
+ * migration_not_allowed, after it reads the setting on both tenants; its
+ * message names the tenant. Any other error, a 403 included, is shown as it
+ * is: by then the setting was not found off, and a 403 can mean other things,
+ * such as a read-back refused or a role without rights.
+ */
+function migrationErrorHint(err, fallback) {
+  const m = String(err?.message || fallback);
+  if (err?.body?.error === "migration_not_allowed") {
+    return `${escapeHtml(m)}<br/><br/><strong>Fix:</strong> In Sophos Fusion on each tenant named above, go to <strong>Overview &gt; Global Settings &gt; Device Migration</strong> and turn on <strong>Allow device migration</strong>. Then retry.`;
   }
   if (/must not match the current tenant/i.test(m)) {
     return `${escapeHtml(m)}<br/><br/><strong>Fix:</strong> The source and destination appear to be the same tenant. Check your credential configuration.`;
