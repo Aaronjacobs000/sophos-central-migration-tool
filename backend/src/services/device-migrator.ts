@@ -262,15 +262,29 @@ export async function startMigration(
       // Sophos gave no clear answer. The sending tenant knows the job only
       // once the trigger has gone through, so read the job back there.
       // Only a job the sending tenant reports as sending counts.
+      let seen = "no such job there";
       const found = await readBack(async () => {
         // A 404 is a read that worked: the sending tenant does not know the job.
         const job = await getMigrationJob(from.client, from.tenantId, receiver.id).catch((e: unknown) => {
           if (isNotFound(e instanceof Error ? e.message : String(e))) return null;
           throw e;
         });
-        return job && /^send/i.test(String(job.mode ?? job.type ?? "")) ? job : undefined;
+        const mode = String(job?.mode ?? job?.type ?? "");
+        if (job && /^send/i.test(mode)) return job;
+        seen = job ? `the job there, but not marked as sending (mode: ${mode || "not reported"})` : "no such job there";
+        return undefined;
       });
-      if (!found.value) throw new Error(`${notFound(err, found.unread).message} ${JOBS_PAGE_NOTE}`, { cause: err });
+      if (!found.value) {
+        const sendingName = tenantOf(from).name;
+        const receivingName = tenantOf(to).name;
+        const miss = notFound(err, {
+          where: `migration job ${receiver.id} on the sending tenant${sendingName ? ` ${sendingName}` : ""}`,
+          found: seen,
+          advice: `Nothing was saved in this tool. The receiving job on ${receivingName ?? "the receiving tenant"} was left in place in case the move started, and expires by itself after 14 days. In a few minutes, open the Migrations page, which lists the jobs on both tenants: if job ${receiver.id.slice(0, 8)} shows as sending, the move started; if not, start the move again.`,
+          check: "the Migrations page",
+        }, found.unread);
+        throw new Error(found.unread ? `${miss.message} ${JOBS_PAGE_NOTE}` : miss.message, { cause: err });
+      }
       sender = found.value;
       senderNote = foundNote(err, "the move", "on the sending tenant");
       log.emit("warn", "migration", `Sender trigger: ${senderNote}.`, { side: from.label as "source" | "dest" });

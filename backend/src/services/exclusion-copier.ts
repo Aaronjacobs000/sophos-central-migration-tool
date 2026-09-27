@@ -49,6 +49,18 @@ export const EXCLUSION_TYPES: ExclusionType[] = [
   "tls-excluded-websites",
 ];
 
+/** Each list's name in messages. */
+export const EXCLUSION_LABELS: Record<ExclusionType, string> = {
+  scanning: "scanning exclusions",
+  "allowed-items": "allowed items",
+  "blocked-items": "blocked items",
+  isolation: "isolation exclusions",
+  "intrusion-prevention": "intrusion prevention exclusions",
+  "exploit-mitigation": "custom exploit mitigation applications",
+  "local-sites": "Website Management entries",
+  "tls-excluded-websites": "websites excluded from TLS decryption",
+};
+
 /** Websites excluded from TLS decryption have no ID; their value identifies them. */
 export const idOf = (type: ExclusionType, item: any): string =>
   type === "tls-excluded-websites" ? String(item.value ?? "") : String(item.id ?? "");
@@ -143,6 +155,8 @@ export async function copyExclusions(
         const { value: created, note } = await createChecked(
           () => createForType(type, dst.client, dst.tenantId, body),
           async () => (await listForType(type, dst.client, dst.tenantId)).find((d) => keyOf(d) === key),
+          "it",
+          { where: `the destination's ${EXCLUSION_LABELS[type]}`, found: "no matching item" },
         );
         destKeys.add(
           type === "scanning" || type === "allowed-items" || type === "blocked-items"
@@ -320,10 +334,12 @@ async function copyTlsExcludedWebsites(
           return got.length === wanted.size ? got : undefined;
         });
         const found = back.value ?? (back.unread ? [] : await present().catch(() => []));
-        if (!found.length) throw notFound(err, back.unread);
+        const where = `the destination's ${EXCLUSION_LABELS[type]}`;
+        const n = batch.length;
+        if (!found.length) throw notFound(err, { where, found: n === 1 ? "the website was not there" : `none of the ${n} websites it sent` }, back.unread);
         res = { added: found };
         note = foundNote(err, "the website");
-        if (found.length < batch.length) unclear = notFound(err).message;
+        if (found.length < n) unclear = notFound(err, { where, found: `${found.length} of the ${n} websites it sent, but not this one` }).message;
       }
       const added = new Set((res.added ?? batch).map((w) => keyFor(type, w)));
       await auditOrWarn({

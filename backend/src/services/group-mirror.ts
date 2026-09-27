@@ -94,6 +94,7 @@ export async function mirrorGroups(req: MirrorGroupsRequest): Promise<MirrorGrou
         }),
         async () => (await listGroups(dst.client, dst.tenantId)).find((g) => g.name.toLowerCase() === name),
         "the group",
+        { where: "the destination's endpoint groups", found: `no group named "${sourceGroup.name}"` },
       );
       // A second source group with this name ignoring case is then already there.
       destNames.add(name);
@@ -187,6 +188,7 @@ export async function mirrorUserGroups(req: MirrorUserGroupsRequest): Promise<Mi
         () => createUserGroup(dst.client, dst.tenantId, body),
         async () => (await listUserGroups(dst.client, dst.tenantId)).find((g) => g.name.toLowerCase() === name),
         "the user group",
+        { where: "the destination's user groups", found: `no user group named "${group.name}"` },
       );
       destNames.add(name);
       await auditOrWarn({

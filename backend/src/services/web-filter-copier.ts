@@ -113,6 +113,7 @@ export async function copyWebFilters(req: CopyWebFiltersRequest): Promise<WebFil
         () => createSiteList(dst.client, dst.tenantId, body),
         async () => (await listSiteLists(dst.client, dst.tenantId)).find((l) => nameKey(l.name) === nameKey(list.name)),
         "the site list",
+        { where: "the destination's site lists", found: `no site list named "${list.name}"` },
       );
       listMap.set(id, created.id);
       dstListByName.set(nameKey(list.name), created);
@@ -185,6 +186,7 @@ export async function copyWebFilters(req: CopyWebFiltersRequest): Promise<WebFil
         () => createProfile(dst.client, dst.tenantId, body),
         async () => (await listProfiles(dst.client, dst.tenantId)).find((p) => nameKey(p.name) === nameKey(profile.name)),
         "the profile",
+        { where: "the destination's web filtering profiles", found: `no profile named "${profile.name}"` },
       );
       dstProfileByName.set(nameKey(profile.name), created);
       await auditOrWarn({

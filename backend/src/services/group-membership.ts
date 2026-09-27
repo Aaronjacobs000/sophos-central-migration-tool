@@ -98,6 +98,9 @@ export async function restoreGroupMembership(
   const contexts = await verifiedContextsForJob(job);
   const from = contexts[sendingSide];
   const to = contexts[receivingSide];
+  // For messages: the receiving tenant by name, which is the source tenant for a move back.
+  const receivingName = job.tenants?.[receivingSide]?.name || to.summary.displayName || to.summary.tenantName;
+  const onReceiving = receivingName ? `on ${receivingName}` : "on the receiving tenant";
 
   // 1. New IDs. The receiving side is asked first; the sending side fills gaps.
   const statusById = new Map<string, MigrationEndpointStatus>();
@@ -237,9 +240,17 @@ export async function restoreGroupMembership(
               return got.length === batch.length ? got : undefined;
             });
             const found = back.value ?? (back.unread ? [] : await inGroup().catch(() => []));
-            if (!found.length) throw notFound(err, back.unread);
+            const group = `the group "${g.name}" ${onReceiving}`;
+            const miss = (what: string) => ({
+              where: group,
+              found: what,
+              advice: "Wait a minute, then preview again: a device in the group by then shows as already in group.",
+              check: group,
+            });
+            const n = batch.length;
+            if (!found.length) throw notFound(err, miss(n === 1 ? "the device was not in it" : `none of the ${n} devices in it`), back.unread);
             note = foundNote(err, found.length === 1 ? "the device in the group" : "the devices in the group");
-            unclear = notFound(err).message;
+            unclear = notFound(err, miss(`${found.length} of the ${n} devices in it, but not this one`)).message;
             for (const id of batch) if (!found.includes(id)) problems.set(id, unclear);
             for (const id of found) readBackNotes.set(id, note);
             res = { addedEndpoints: found.map((id) => ({ id })) };

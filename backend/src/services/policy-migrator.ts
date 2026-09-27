@@ -284,6 +284,7 @@ export async function migratePolicies(
               async () => (await listPolicies(dst.client, dst.tenantId))
                 .find((p) => p.type === body.type && p.name === body.name && !destIds.has(p.id)),
               "the policy",
+              { where: "the destination's policies", found: `no new ${body.type} policy named "${body.name}"` },
             ));
           }
           // A later read-back in this run must not take this clone for its own.

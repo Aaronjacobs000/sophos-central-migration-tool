@@ -6,7 +6,9 @@
  * write twice (sophos-client.ts): it throws UnclearWriteError. The copies
  * then read the destination back, a few times to get past read lag, and
  * report what they find: made, with a note saying how Sophos answered, or not
- * found, with the advice to check the destination before trying again.
+ * found, saying where the tool looked and what it found there. A miss is not
+ * proof, because Sophos can take a while to show a write, so the advice is
+ * to wait before trying again, not to check a place the tool already read.
  */
 
 import { UnclearWriteError } from "../sophos/client/sophos-client.js";
@@ -64,13 +66,57 @@ export function foundNote(err: UnclearWriteError, what = "it", where = "on the d
   return `${answered(err)}, but a read-back found ${what} ${where}, so the change was made`;
 }
 
+/** Said with every miss: Sophos can be slow to show a write, so not finding it proves nothing. */
+export const READ_LAG_CAVEAT = "Sophos can take a while to show a change, so this does not prove it failed.";
+
+/**
+ * The advice after a create a read-back did not find. Every copy skips what
+ * is already on the destination, so trying again after a wait is safe.
+ */
+export const CREATE_RETRY_ADVICE = "Wait a minute or two, then try again: anything on the destination by then is skipped as already there.";
+
+/** Where a read-back looked and what it found, for the message when it finds nothing. */
+export interface ReadBackMiss {
+  /** What the tool read, for example "the destination's endpoint groups". */
+  where: string;
+  /** What it found there, for example 'no group named "Finance"'. */
+  found: string;
+  /** What to do next, given that the tool has already looked. Defaults to CREATE_RETRY_ADVICE. */
+  advice?: string;
+  /** What to check by hand when no read worked. Defaults to "the destination". */
+  check?: string;
+}
+
+/** "three times over about 10 seconds", from the waits. */
+function readsSaid(): string {
+  const n = delaysMs.length;
+  const times = n === 1 ? "once" : n === 2 ? "twice" : n === 3 ? "three times" : `${n} times`;
+  const seconds = Math.round(delaysMs.reduce((a, b) => a + b, 0) / 1000);
+  return seconds >= 1 ? `${times} over about ${seconds} seconds` : times;
+}
+
 /**
  * The error for an unclear write a read-back did not find, or could not
- * read (unread): still unclear, and it says which.
+ * read (unread): still unclear. It says where the tool looked and what it
+ * found, that a miss is not proof, and what to do next; or, when nothing
+ * could be read, what to check by hand.
  */
-export function notFound(err: UnclearWriteError, unread?: string): UnclearWriteError {
-  const readBackSaid = unread ? `A read-back could not read the destination (${unread.replace(/\.$/, "")})` : "A read-back did not find it yet";
-  return new UnclearWriteError(`${err.reason.replace(/\.$/, "")}. ${readBackSaid}`, err.method, err.status);
+export function notFound(err: UnclearWriteError, miss: ReadBackMiss, unread?: string): UnclearWriteError {
+  const reason = err.reason.replace(/\.$/, "");
+  if (unread) {
+    return new UnclearWriteError(
+      `${reason}. A read-back could not read ${miss.where} (${unread.replace(/\.$/, "")})`,
+      err.method,
+      err.status,
+      `The change may still have gone through: check ${miss.check ?? "the destination"} before trying again.`,
+    );
+  }
+  return new UnclearWriteError(
+    `${reason}. The tool read ${miss.where} ${readsSaid()} and found ${miss.found}`,
+    err.method,
+    err.status,
+    `${READ_LAG_CAVEAT} ${miss.advice ?? CREATE_RETRY_ADVICE}`,
+  );
 }
 
 /**
@@ -79,18 +125,19 @@ export function notFound(err: UnclearWriteError, unread?: string): UnclearWriteE
  * a duplicate.
  */
 export function earlierUnclear(same = "name"): string {
-  return `not sent: an earlier create in this run with the same ${same} got no clear answer from Sophos, so this one could make a duplicate; check the destination, then try again`;
+  return `not sent: an earlier create in this run with the same ${same} got no clear answer from Sophos, so this one could make a duplicate. Wait a minute or two, then try again: anything on the destination by then is skipped as already there`;
 }
 
 /**
  * Runs a create. When Sophos gives no clear answer, reads the destination
  * back with find(): the object and a note when it is there, else an
- * UnclearWriteError that says a read-back did not find it.
+ * UnclearWriteError that says where the tool looked and what it found.
  */
 export async function createChecked<T>(
   create: () => Promise<T>,
   find: () => Promise<T | null | undefined>,
-  what?: string,
+  what: string,
+  miss: ReadBackMiss,
 ): Promise<{ value: T; note?: string }> {
   try {
     return { value: await create() };
@@ -98,6 +145,6 @@ export async function createChecked<T>(
     if (!isUnclearWrite(err)) throw err;
     const found = await readBack(find);
     if (found.value !== undefined) return { value: found.value, note: foundNote(err, what) };
-    throw notFound(err, found.unread);
+    throw notFound(err, miss, found.unread);
   }
 }

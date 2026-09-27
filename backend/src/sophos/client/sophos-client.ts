@@ -29,7 +29,8 @@ export const UNCLEAR_WRITE_ADVICE = "The change may still have gone through: che
  * A write (anything but GET) that ended without a clear answer: a 5xx, no
  * answer within the timeout, or a dropped connection. Sophos can answer 500
  * and still make the change (seen live on 26/09/2026), so the write is not
- * sent again, and the message says to check the destination first.
+ * sent again, and the message says to check the destination first, unless
+ * a read-back has already looked and gives its own advice.
  */
 export class UnclearWriteError extends Error {
   constructor(
@@ -38,8 +39,9 @@ export class UnclearWriteError extends Error {
     readonly method: string,
     /** The HTTP status, when Sophos answered. */
     readonly status?: number,
+    advice: string = UNCLEAR_WRITE_ADVICE,
   ) {
-    super(`${reason.replace(/\.$/, "")}. ${UNCLEAR_WRITE_ADVICE}`);
+    super(`${reason.replace(/\.$/, "")}. ${advice}`);
     this.name = "UnclearWriteError";
   }
 }

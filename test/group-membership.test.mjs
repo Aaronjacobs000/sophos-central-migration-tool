@@ -296,14 +296,14 @@ test("an addition Sophos answers with 500 is sent once, and a read-back that fin
   assert.equal(entries[0].ok, true);
   assert.match(entries[0].detail.note, /read-back found/);
 
-  // Not there on any read-back: failed, with the warning to check first.
+  // Not there on any read-back: failed, saying where the tool looked and what it found, and to wait, not to go and check.
   seedMoved();
   addBehaviour = () => ({ status: 500, body: { error: "InternalError" } });
   fake.reset();
   const again = await restoreGroupMembership("local-1");
   const r1b = again.rows.find((r) => r.endpointId === uuid(1));
   assert.equal(r1b.status, "error");
-  assert.match(r1b.message, /A read-back did not find it yet\. The change may still have gone through: check the destination before trying again\./);
+  assert.equal(r1b.message, 'Sophos API error 500: InternalError. The tool read the group "FINANCE" on Test Destination three times and found the device was not in it. Sophos can take a while to show a change, so this does not prove it failed. Wait a minute, then preview again: a device in the group by then shows as already in group.');
   assert.equal(fake.writes().length, 1);
 });
 
@@ -329,6 +329,24 @@ test("a job moving devices back to the source adds them on the source tenant", a
   assert.ok(groupReads.every((c) => c.tenant === "src"));
 });
 
+test("an addition on a job moving devices back names the source tenant it read, and says what to check when it could not read", async () => {
+  const { setReadBackDelays } = await import("../backend/dist/services/write-check.js");
+  setReadBackDelays([0, 0, 0]);
+  seedMoved();
+  const srcGroups = [{ id: "sg-fin", name: "Finance", type: "computer" }];
+  let reads = 0;
+  fake.on(SRC, "GET", "/endpoint/v1/endpoint-groups", (req) => page(srcGroups, req.query));
+  fake.on(SRC, "GET", /^\/endpoint\/v1\/endpoint-groups\/[^/]+\/endpoints$/, () => (++reads === 1 ? { body: { items: [], pages: { size: 500 } } } : { status: 403, body: { error: "Forbidden", message: "no read" } }));
+  fake.on(SRC, "POST", /^\/endpoint\/v1\/endpoint-groups\/[^/]+\/endpoints$/, () => ({ status: 500, body: { error: "InternalError" } }));
+  await writeJobs([baseJob({ direction: "dest-to-source" })]);
+  fake.reset();
+  const res = await restoreGroupMembership("local-1", { dryRun: false, choices: { [uuid(1)]: "sg-fin", [uuid(2)]: null, [uuid(3)]: null, [uuid(4)]: null, [uuid(5)]: null } });
+  const r1 = res.rows.find((r) => r.endpointId === uuid(1));
+  assert.equal(r1.status, "error");
+  assert.equal(r1.message, 'Sophos API error 500: InternalError. A read-back could not read the group "Finance" on Test Source (Sophos API error 403: Forbidden - no read). The change may still have gone through: check the group "Finance" on Test Source before trying again.');
+  assert.deepEqual(fake.writes().map((w) => w.tenant), ["src"]);
+});
+
 test("an unknown job id is a not-found error", async () => {
   await writeJobs([]);
   await assert.rejects(() => restoreGroupMembership("nope"), /not found/);
@@ -351,10 +369,10 @@ test("an addition only partly found by the read-back says the rest may have gone
   const by = (n) => res.rows.find((r) => r.endpointId === uuid(n));
   assert.equal(by(1).status, "added");
   assert.equal(by(4).status, "error");
-  assert.match(by(4).message, /A read-back did not find it yet\. The change may still have gone through/);
+  assert.match(by(4).message, /The tool read the group "Child" on Test Destination three times and found 1 of the 2 devices in it, but not this one\. Sophos can take a while to show a change, so this does not prove it failed\. Wait a minute, then preview again/);
   const [entry] = (await readAudit(root)).slice(before);
   assert.equal(entry.ok, false);
-  assert.match(entry.error, /The change may still have gone through/);
+  assert.match(entry.error, /found 1 of the 2 devices in it, but not this one/);
   assert.equal(fake.writes().length, 1);
 });
 
