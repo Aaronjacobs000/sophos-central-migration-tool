@@ -19,6 +19,7 @@ const { copyWebFilters } = await import("../backend/dist/services/web-filter-cop
 const { migratePolicies } = await import("../backend/dist/services/policy-migrator.js");
 const { startMigration } = await import("../backend/dist/services/device-migrator.js");
 const { getJob } = await import("../backend/dist/services/migration-store.js");
+const { publicJob } = await import("../backend/dist/services/job-view.js");
 
 // No waiting in tests: the read retry backoff and the read-back waits.
 SophosClient.prototype.sleep = async () => {};
@@ -469,11 +470,43 @@ test("device move: a trigger answered 500 that the sending tenant shows started 
   assert.equal(saved.sourceMigrationId, "job-9");
   assert.equal(saved.destMigrationId, "job-9");
   assert.deepEqual(migrationWrites(), ["dst POST", "src PUT"], "sent once, and the receiving job is not deleted");
+  const note = "Sophos answered 500, but a read-back found the move on the sending tenant Test Source, so the change was made";
   const [entry] = await lastAudit();
   assert.equal(entry.resource, "migration-sender");
   assert.equal(entry.ok, true);
-  assert.match(entry.detail.note, /read-back found the move on the sending tenant, so the change was made/);
-  assert.doesNotMatch(entry.detail.note, /on the destination/, "the trigger is read back on the sending tenant");
+  assert.equal(entry.detail.note, note);
+  // Where the user acted: the start answers with the job, and the job page shows its start notes.
+  assert.deepEqual(saved.startNotes, [note]);
+  assert.deepEqual(publicJob(saved).startNotes, [note]);
+});
+
+test("device move: a trigger with a clear answer leaves no start note", async () => {
+  fake.on(SRC, "PUT", "/endpoint/v1/migrations/job-9", () => ({ body: { id: "job-9", mode: "sending" } }));
+  try {
+    fake.reset();
+    const res = await startMigration({ jobName: "clear trigger", endpointIds: [DEVICE] });
+    assert.equal((await getJob(res.job.localJobId)).startNotes, undefined);
+  } finally {
+    fake.on(SRC, "PUT", "/endpoint/v1/migrations/job-9", () => ({ status: 500, body: { error: "InternalError" } }));
+  }
+});
+
+test("the job page shows a job's start notes as an alert", async () => {
+  const js = await readFile(new URL("../frontend/js/page-migrate-job-detail.js", import.meta.url), "utf8");
+  const src = js.slice(js.indexOf("function renderAlerts"), js.indexOf("function alert("));
+  const shown = [];
+  const renderAlerts = new Function("checkable", "alert", "setHtml", "esc", "WAIT_NOTE_MS", `${src}; return renderAlerts;`)(
+    () => true,
+    (tone, ico, title, body) => `${tone}|${title}|${body}`,
+    (_id, html) => shown.push(html),
+    (t) => String(t),
+    7200e3,
+  );
+  const note = "Sophos answered 500, but a read-back found the move on the sending tenant Test Source, so the change was made";
+  renderAlerts({ monitor: { state: "ok" }, credentials: { stored: true }, startNotes: [note], progress: { finished: false, expired: 0, devices: [] } });
+  assert.equal(shown.at(-1), `info|Sophos gave no clear answer when this move started|${note}.`);
+  renderAlerts({ monitor: { state: "ok" }, credentials: { stored: true }, progress: { finished: false, expired: 0, devices: [] } });
+  assert.equal(shown.at(-1), "", "no alert without a note");
 });
 
 const TRIGGER_ADVICE = "Nothing was saved in this tool. The receiving job on Test Destination was left in place in case the move started, and expires by itself after 14 days. In a few minutes, open the Migrations page, which lists the jobs on both tenants: if job job-9 shows as sending, the move started; if not, start the move again.";

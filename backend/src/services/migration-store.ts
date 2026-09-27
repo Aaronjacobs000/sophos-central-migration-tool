@@ -127,6 +127,11 @@ export interface LocalMigrationJob {
   /** Check-in on the receiving tenant, by the device's ID on the sending tenant. */
   checkIns?: Record<string, DeviceCheckIn>;
   /**
+   * Notes from starting the job, shown on the job page: a trigger Sophos
+   * answered unclearly that a read-back found started says so here.
+   */
+  startNotes?: string[];
+  /**
    * Derived from the devices on every check (job-progress.ts). Jobs saved by
    * earlier versions may hold "complete", "in-progress" or "partially-complete",
    * which meant the handover only; they are recomputed when read.

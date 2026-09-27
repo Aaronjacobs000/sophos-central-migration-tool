@@ -286,7 +286,8 @@ export async function startMigration(
         throw new Error(found.unread ? `${miss.message} ${JOBS_PAGE_NOTE}` : miss.message, { cause: err });
       }
       sender = found.value;
-      senderNote = foundNote(err, "the move", "on the sending tenant");
+      const sendingName = tenantOf(from).name;
+      senderNote = foundNote(err, "the move", `on the sending tenant${sendingName ? ` ${sendingName}` : ""}`);
       log.emit("warn", "migration", `Sender trigger: ${senderNote}.`, { side: from.label as "source" | "dest" });
     }
     log.emit("info", "migration", `Sender triggered: id=${sender.id}, mode=${(sender as any).mode}`, {
@@ -355,6 +356,8 @@ export async function startMigration(
       direction,
       tenants: { source: tenantOf(sourceCtx), dest: tenantOf(destCtx) },
       credentials,
+      // Shown on the job page, where the user lands after starting the move.
+      ...(senderNote ? { startNotes: [senderNote] } : {}),
     });
   } finally {
     releaseCredentials(credentials);

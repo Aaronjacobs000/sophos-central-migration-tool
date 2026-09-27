@@ -263,6 +263,10 @@ function renderAlerts(job) {
       actions(btn("attach-current", "Store credentials", true))));
   }
 
+  // How the start went, when Sophos gave no clear answer to it: the note the read-back left.
+  for (const note of job.startNotes ?? []) {
+    out.push(alert("info", "info", "Sophos gave no clear answer when this move started", `${esc(note)}.`, ""));
+  }
   if (checkable(job) && !p.finished && p.oldestWaitSince && Date.now() - Date.parse(p.oldestWaitSince) > WAIT_NOTE_MS) {
     const long = p.devices.filter((d) => d.state === "waiting" && Date.now() - Date.parse(d.handedOverAt) > WAIT_NOTE_MS).length;
     out.push(alert("info", "clock", `${long} device${long === 1 ? " has" : "s have"} waited over 2 hours to check in`,
