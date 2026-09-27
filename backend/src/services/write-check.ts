@@ -60,8 +60,8 @@ function answered(err: UnclearWriteError): string {
 }
 
 /** The note on a write Sophos answered unclearly and a read-back found done. */
-export function foundNote(err: UnclearWriteError, what = "it"): string {
-  return `${answered(err)}, but a read-back found ${what} on the destination, so the change was made`;
+export function foundNote(err: UnclearWriteError, what = "it", where = "on the destination"): string {
+  return `${answered(err)}, but a read-back found ${what} ${where}, so the change was made`;
 }
 
 /**

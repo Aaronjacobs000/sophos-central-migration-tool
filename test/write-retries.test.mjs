@@ -396,7 +396,8 @@ test("device move: a trigger answered 500 that the sending tenant shows started 
   const [entry] = await lastAudit();
   assert.equal(entry.resource, "migration-sender");
   assert.equal(entry.ok, true);
-  assert.match(entry.detail.note, /read-back found the move on the sending tenant/);
+  assert.match(entry.detail.note, /read-back found the move on the sending tenant, so the change was made/);
+  assert.doesNotMatch(entry.detail.note, /on the destination/, "the trigger is read back on the sending tenant");
 });
 
 test("device move: a trigger answered 500 that no read-back finds fails, leaves the receiving job, and says where to look", async () => {

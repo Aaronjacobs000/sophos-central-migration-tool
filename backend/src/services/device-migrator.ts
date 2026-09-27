@@ -272,7 +272,7 @@ export async function startMigration(
       });
       if (!found.value) throw new Error(`${notFound(err, found.unread).message} ${JOBS_PAGE_NOTE}`, { cause: err });
       sender = found.value;
-      senderNote = foundNote(err, "the move on the sending tenant");
+      senderNote = foundNote(err, "the move", "on the sending tenant");
       log.emit("warn", "migration", `Sender trigger: ${senderNote}.`, { side: from.label as "source" | "dest" });
     }
     log.emit("info", "migration", `Sender triggered: id=${sender.id}, mode=${(sender as any).mode}`, {
