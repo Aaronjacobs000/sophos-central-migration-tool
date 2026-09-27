@@ -249,7 +249,7 @@ export async function restoreGroupMembership(
             });
             const n = batch.length;
             if (!found.length) throw notFound(err, miss(n === 1 ? "the device was not in it" : `none of the ${n} devices in it`), back.unread);
-            note = foundNote(err, found.length === 1 ? "the device in the group" : "the devices in the group");
+            note = foundNote(err, found.length === 1 ? "the device in the group" : "the devices in the group", onReceiving);
             unclear = notFound(err, miss(`${found.length} of the ${n} devices in it, but not this one`)).message;
             for (const id of batch) if (!found.includes(id)) problems.set(id, unclear);
             for (const id of found) readBackNotes.set(id, note);

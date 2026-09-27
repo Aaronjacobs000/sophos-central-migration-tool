@@ -289,7 +289,7 @@ test("an addition Sophos answers with 500 is sent once, and a read-back that fin
   const res = await restoreGroupMembership("local-1");
   const r1 = res.rows.find((r) => r.endpointId === uuid(1));
   assert.equal(r1.status, "added");
-  assert.match(r1.message, /^Sophos answered 500, but a read-back found the device in the group on the destination/);
+  assert.equal(r1.message, "Sophos answered 500, but a read-back found the device in the group on Test Destination, so the change was made");
   assert.equal(fake.writes().length, 1, "never sent twice");
   const entries = (await readAudit(root)).slice(before);
   assert.equal(entries.length, 1);
@@ -345,6 +345,21 @@ test("an addition on a job moving devices back names the source tenant it read, 
   assert.equal(r1.status, "error");
   assert.equal(r1.message, 'Sophos API error 500: InternalError. A read-back could not read the group "Finance" on Test Source (Sophos API error 403: Forbidden - no read). The change may still have gone through: check the group "Finance" on Test Source before trying again.');
   assert.deepEqual(fake.writes().map((w) => w.tenant), ["src"]);
+
+  // Found there after the unclear answer: the note names the source tenant, not "the destination".
+  seedMoved();
+  const members = [];
+  reads = 0;
+  fake.on(SRC, "GET", /^\/endpoint\/v1\/endpoint-groups\/[^/]+\/endpoints$/, () => ({ body: { items: members.map((id) => ({ id })), pages: { size: 500 } } }));
+  fake.on(SRC, "POST", /^\/endpoint\/v1\/endpoint-groups\/[^/]+\/endpoints$/, (req) => {
+    members.push(...req.body.ids);
+    return { status: 500, body: { error: "InternalError" } };
+  });
+  fake.reset();
+  const found = await restoreGroupMembership("local-1", { dryRun: false, choices: { [uuid(1)]: "sg-fin", [uuid(2)]: null, [uuid(3)]: null, [uuid(4)]: null, [uuid(5)]: null } });
+  const f1 = found.rows.find((r) => r.endpointId === uuid(1));
+  assert.equal(f1.status, "added");
+  assert.equal(f1.message, "Sophos answered 500, but a read-back found the device in the group on Test Source, so the change was made");
 });
 
 test("an unknown job id is a not-found error", async () => {
