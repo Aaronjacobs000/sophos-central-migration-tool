@@ -6,6 +6,7 @@ import dotenv from "dotenv";
 import { initState } from "./state.js";
 import { log } from "./log.js";
 import { errorHandler } from "./middleware/error-handler.js";
+import { localHostOnly } from "./middleware/local-host.js";
 import { auditWarnings } from "./services/audit-log.js";
 import { statusRouter } from "./routes/status.js";
 import { credentialsRouter } from "./routes/credentials.js";
@@ -39,6 +40,8 @@ async function main() {
   const HOST = "127.0.0.1";
 
   const app = express();
+  // First, so a page on another site that reaches 127.0.0.1 by DNS rebinding gets nothing.
+  app.use(localHostOnly);
   app.use(express.json({ limit: "2mb" }));
   // After the body parser, so every route runs inside it.
   app.use(auditWarnings);

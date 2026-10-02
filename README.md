@@ -185,8 +185,9 @@ data/                            # Created at run time, not committed
 ## Security
 
 - The server listens on **127.0.0.1 only**, so it is not reachable from the network.
+- It answers only requests addressed to `127.0.0.1` or `localhost`, and takes a change only from a page on one of those, so a website can't drive it by pointing its own name at 127.0.0.1 (DNS rebinding).
 - The tool has no sign-in of its own. Anyone who can reach it can use it, which means acting with the credentials in `.env` and the ones stored with jobs. Everyone who uses one copy shares its connection and its jobs, and the audit log does not record who made a change.
-- To share it with a team, run it on a server behind your own sign-in, for example a reverse proxy with single sign-on on the same server that forwards to `127.0.0.1:3100`. The listen address is set in `backend/src/server.ts`, so listening on any other address is a code change today.
+- To share it with a team, run it on a server behind your own sign-in, for example a reverse proxy with single sign-on on the same server that forwards to `127.0.0.1:3100`. If the proxy passes on its own host name, add that name to `ALLOWED_HOSTS` in `.env` (comma-separated). The listen address is set in `backend/src/server.ts`, so listening on any other address is a code change today.
 - Changes need a JSON request, or a PUT, PATCH or DELETE, which a browser sends to 127.0.0.1 for another site only after a CORS preflight that the server never answers. So a page on another site can't make a change by posting a form. Adding moved devices to groups also needs `dryRun` set to `true` or `false`.
 - Credentials are stored in **plain text** in `.env` at the repo root. Run the tool only on a trusted workstation with full-disk encryption, and do not commit, back up or sync `.env` to cloud drives. `.gitignore` excludes it.
 - The API never returns secrets. The credentials page shows masked values.
