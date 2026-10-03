@@ -147,10 +147,10 @@
       <section class="panel-card">
         <h2>Security</h2>
         <ul>
-          <li>The server only listens on <code>127.0.0.1</code> and is not reachable from the network.</li>
-          <li>It answers only requests addressed to <code>127.0.0.1</code> or <code>localhost</code>, and takes a change only from a page on one of those, so a website can't drive it by pointing its own name at 127.0.0.1 (DNS rebinding).</li>
+          <li>By default the server listens only on <code>127.0.0.1</code> and is not reachable from the network. <code>HOST</code> and <code>ALLOWED_IPS</code> in <code>.env</code> open it to chosen machines; the README's <em>Using it from other machines</em> explains how.</li>
+          <li>It answers only requests addressed to <code>127.0.0.1</code> or <code>localhost</code>, and takes a change only from a page on one of those, so a website can't drive it by pointing its own name at 127.0.0.1 (DNS rebinding). When <code>HOST</code> opens it to the network, the computer's own IP addresses are accepted too, because a rebinding attack needs a name.</li>
           <li>The tool has no sign-in of its own. Anyone who can reach it acts with the credentials in <code>.env</code> and the ones stored with jobs. Everyone who uses one copy shares its connection and its jobs, and the audit log does not record who made a change.</li>
-          <li>To share it with a team, run it on a server behind your own sign-in, for example a reverse proxy with single sign-on on the same server that forwards to <code>127.0.0.1:3100</code>. If the proxy passes on its own host name, add that name to <code>ALLOWED_HOSTS</code> in <code>.env</code> (comma-separated). Listening on any other address is a code change today.</li>
+          <li>To share it with a team, run it on a server behind your own sign-in, for example a reverse proxy with single sign-on on the same server that forwards to <code>127.0.0.1:3100</code>. If the proxy passes on its own host name, add that name to <code>ALLOWED_HOSTS</code> in <code>.env</code> (comma-separated).</li>
           <li>Credentials are stored in <code>.env</code> at the repo root, which <code>.gitignore</code> excludes. Do not back it up to cloud drives, and run the tool on a workstation with full-disk encryption.</li>
           <li>The API never returns secrets; the credentials page shows masked values.</li>
           <li>Destructive actions (delete, overwrite) ask for confirmation.</li>
