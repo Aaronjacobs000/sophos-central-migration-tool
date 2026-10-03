@@ -200,3 +200,15 @@ export function ownAddresses(): string[] {
 export function addressUrl(host: string, port: number): string {
   return `http://${net.isIPv6(host) ? `[${host}]` : host}:${port}`;
 }
+
+/** Why the server can't listen, in one line that names the setting to change. */
+export function listenErrorMessage(err: unknown, host: string, port: number): string {
+  const code = (err as NodeJS.ErrnoException | null)?.code;
+  if (code === "EADDRNOTAVAIL") {
+    return `HOST is ${host}, which is not an address on this computer. Use 127.0.0.1 (the default), 0.0.0.0, :: or one of this computer's own addresses.`;
+  }
+  if (code === "EADDRINUSE") {
+    return `port ${port} on ${host} is already in use. Stop whatever is using it, or set PORT in .env to a free port.`;
+  }
+  return `can't listen on ${addressUrl(host, port)}: ${err instanceof Error ? err.message : String(err)}`;
+}

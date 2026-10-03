@@ -8,7 +8,7 @@ import { log } from "./log.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { localHostOnly } from "./middleware/local-host.js";
 import { allowedClientsOnly } from "./middleware/client-ip.js";
-import { addressUrl, networkSettings, type NetworkSettings } from "./config/network.js";
+import { addressUrl, listenErrorMessage, networkSettings, type NetworkSettings } from "./config/network.js";
 import { auditWarnings } from "./services/audit-log.js";
 import { statusRouter } from "./routes/status.js";
 import { credentialsRouter } from "./routes/credentials.js";
@@ -115,10 +115,19 @@ async function main() {
 
   app.use(errorHandler);
 
-  app.listen(PORT, HOST, () => {
-    log.info(`listening on ${addressUrl(HOST, PORT)} (repo: ${REPO_ROOT})`);
-    logNetwork(network, PORT);
-  });
+  // A HOST that isn't this computer's, a busy port or a bad PORT: one line and exit, no stack trace.
+  const stop = (err: unknown): never => {
+    log.error(`Not starting: ${listenErrorMessage(err, HOST, PORT)}`);
+    process.exit(1);
+  };
+  try {
+    app.listen(PORT, HOST, () => {
+      log.info(`listening on ${addressUrl(HOST, PORT)} (repo: ${REPO_ROOT})`);
+      logNetwork(network, PORT);
+    }).on("error", stop);
+  } catch (err) {
+    stop(err);
+  }
 }
 
 main().catch((err) => {

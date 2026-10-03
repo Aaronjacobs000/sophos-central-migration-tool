@@ -238,3 +238,60 @@ test("server.ts checks the client before the host check, the body parser and eve
   assert.match(src, /app\.listen\(PORT, HOST,/);
   assert.match(src, /const HOST = network\.host;/);
 });
+
+// The real server, from a copy with no .env, so it starts unconfigured and never reads this
+// checkout's settings. fetch is replaced before it loads, so nothing can reach a tenant.
+test("a HOST that isn't this computer's, a busy port and any other listen error stop the server with one line and exit code 1", async () => {
+  const { mkdtemp, cp, symlink, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const net = (await import("node:net")).default;
+  const { spawn } = await import("node:child_process");
+  const { pathToFileURL } = await import("node:url");
+  const root = await mkdtemp(path.join(tmpdir(), "stmt-listen-"));
+  await cp(path.join(process.cwd(), "backend/dist"), path.join(root, "backend/dist"), { recursive: true });
+  await symlink(path.join(process.cwd(), "node_modules"), path.join(root, "node_modules"), "dir");
+  const noFetch = path.join(root, "no-fetch.mjs");
+  await writeFile(noFetch, 'globalThis.fetch = () => Promise.reject(new Error("no network in this test"));\n');
+
+  const busy = net.createServer().listen(0, "127.0.0.1");
+  await once(busy, "listening");
+  const busyPort = busy.address().port;
+
+  function start(env) {
+    return new Promise((resolve) => {
+      const child = spawn(process.execPath, ["--import", pathToFileURL(noFetch).href, path.join(root, "backend/dist/server.js")], {
+        cwd: root,
+        env: { PATH: process.env.PATH, JOB_CREDENTIALS_KEY_FILE: path.join(root, "key", "job-credentials.key"), ...env },
+      });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (c) => { stdout += c; });
+      child.stderr.on("data", (c) => { stderr += c; });
+      // A server that starts listening instead of stopping would never exit.
+      const timer = setTimeout(() => child.kill(), 15000);
+      child.on("exit", (code) => {
+        clearTimeout(timer);
+        resolve({ code, stdout, stderr });
+      });
+    });
+  }
+
+  try {
+    const cases = [
+      [{ HOST: "192.0.2.1", PORT: "0" }, /^\[[^\]]+\] error\s+Not starting: HOST is 192\.0\.2\.1, which is not an address on this computer\. Use 127\.0\.0\.1/],
+      [{ PORT: String(busyPort) }, new RegExp(`^\\[[^\\]]+\\] error\\s+Not starting: port ${busyPort} on 127\\.0\\.0\\.1 is already in use\\. Stop whatever is using it, or set PORT in \\.env to a free port\\.$`)],
+      [{ PORT: "99999" }, /^\[[^\]]+\] error\s+Not starting: can't listen on http:\/\/127\.0\.0\.1:99999: /],
+    ];
+    for (const [env, line] of cases) {
+      const run = await start(env);
+      const label = JSON.stringify(env);
+      assert.equal(run.code, 1, `${label} exit code`);
+      const lines = run.stderr.trim().split("\n");
+      assert.equal(lines.length, 1, `${label} one line: ${run.stderr}`);
+      assert.match(lines[0], line, label);
+      assert.doesNotMatch(run.stdout + run.stderr, /\n\s+at |listening on/, `${label} no stack trace, never listened`);
+    }
+  } finally {
+    busy.close();
+  }
+});
