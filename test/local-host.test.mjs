@@ -204,3 +204,94 @@ test("on loopback (the default), this computer's other addresses are not accepte
     });
   }
 });
+
+// Another web app on this computer shares the tool's host names but not its port, so a change must
+// come from the port the request was sent to. Without that, any page on http://127.0.0.1:<other port>
+// could make changes.
+test("a change from a page on another port of this computer is refused, at every address the tool answers on", async () => {
+  fake.reset();
+  const other = port + 1;
+  const cases = [
+    [`127.0.0.1:${port}`, `http://127.0.0.1:${other}`],
+    [`127.0.0.1:${port}`, "http://127.0.0.1"],
+    [`127.0.0.1:${port}`, "https://127.0.0.1"],
+    [`127.0.0.1:${port}`, `http://localhost:${port}`],
+    [`localhost:${port}`, `http://localhost:${other}`],
+    [`[::1]:${port}`, `http://[::1]:${other}`],
+    ["127.0.0.1", `http://127.0.0.1:${other}`],
+  ];
+  for (const [host, origin] of cases) {
+    const res = await send("POST", "/api/dest/user-groups", { host, origin, body: { name: "x" } });
+    assert.equal(res.status, 403, `${host} from ${origin}`);
+    assert.equal(res.body.error, "forbidden_origin");
+  }
+  await withNetwork("0.0.0.0", async () => {
+    for (const [host, origin] of [
+      [`192.168.50.10:${port}`, `http://192.168.50.10:${other}`],
+      [`192.168.50.10:${port}`, "http://192.168.50.10"],
+      [`[fd00:abcd::10]:${port}`, `http://[fd00:abcd::10]:${other}`],
+    ]) {
+      assert.equal((await send("POST", "/api/dest/user-groups", { host, origin, body: { name: "x" } })).status, 403, `${host} from ${origin}`);
+    }
+    // A name browsed to directly is held to its port too, default port included.
+    process.env.ALLOWED_HOSTS = "migrate-box.local";
+    try {
+      for (const origin of [`http://migrate-box.local:${other}`, "http://migrate-box.local", "https://migrate-box.local"]) {
+        assert.equal((await send("POST", "/api/dest/user-groups", { host: `migrate-box.local:${port}`, origin, body: { name: "x" } })).status, 403, origin);
+      }
+    } finally {
+      delete process.env.ALLOWED_HOSTS;
+    }
+  });
+  assert.deepEqual(fake.writes(), []);
+});
+
+test("a change from the tool's own port passes at every address, and so does one with no Origin", async () => {
+  fake.reset();
+  const cases = [
+    [`127.0.0.1:${port}`, `http://127.0.0.1:${port}`],
+    [`localhost:${port}`, `http://LOCALHOST:${port}`],
+    [`[::1]:${port}`, `http://[::1]:${port}`],
+    [`127.0.0.1:${port}`, undefined],
+  ];
+  for (const [host, origin] of cases) {
+    assert.equal((await send("POST", "/api/dest/user-groups", { host, origin, body: { name: "Same port" } })).status, 201, `${host} from ${origin}`);
+  }
+  await withNetwork("0.0.0.0", async () => {
+    const res = await send("POST", "/api/dest/user-groups", { host: `192.168.50.10:${port}`, origin: `http://192.168.50.10:${port}`, body: { name: "LAN" } });
+    assert.equal(res.status, 201);
+  });
+  assert.equal(fake.writes().length, cases.length + 1);
+});
+
+test("a reverse proxy's name in ALLOWED_HOSTS passes on its default port, whatever the proxy sends as Host", async () => {
+  fake.reset();
+  process.env.ALLOWED_HOSTS = "migrate.example.com";
+  try {
+    const passes = [
+      // The proxy sends the browser's Host on.
+      ["migrate.example.com", "https://migrate.example.com"],
+      [`migrate.example.com:8443`, "https://migrate.example.com:8443"],
+      // The proxy sends its own upstream address as Host.
+      [`127.0.0.1:${port}`, "https://migrate.example.com"],
+      [`127.0.0.1:${port}`, "http://migrate.example.com"],
+    ];
+    for (const [host, origin] of passes) {
+      assert.equal((await send("POST", "/api/dest/user-groups", { host, origin, body: { name: "Proxy users" } })).status, 201, `${host} from ${origin}`);
+    }
+    const refused = [
+      // Another port on the proxy's name, with nothing in Host to say it is the tool's.
+      [`127.0.0.1:${port}`, "https://migrate.example.com:8443"],
+      [`127.0.0.1:${port}`, "https://not-listed.example.com"],
+      ["migrate.example.com", "https://migrate.example.com:8443"],
+    ];
+    for (const [host, origin] of refused) {
+      const res = await send("POST", "/api/dest/user-groups", { host, origin, body: { name: "x" } });
+      assert.equal(res.status, 403, `${host} from ${origin}`);
+      assert.equal(res.body.error, "forbidden_origin");
+    }
+    assert.equal(fake.writes().length, passes.length);
+  } finally {
+    delete process.env.ALLOWED_HOSTS;
+  }
+});
