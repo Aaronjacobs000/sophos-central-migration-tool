@@ -131,3 +131,76 @@ test("server.ts checks the host before the body parser and every route", async (
     assert.ok(src.indexOf(later) > guard, `${later} comes after the host check`);
   }
 });
+
+// With HOST off loopback, people browse to http://<this computer's IP>:<port>. A bare IP address
+// can't be a rebinding attacker's name, so this computer's own addresses are accepted; names still
+// need ALLOWED_HOSTS.
+const os = (await import("node:os")).default;
+const LAN = { address: "192.168.50.10", family: "IPv4", internal: false };
+const LAN6 = { address: "fd00:abcd::10", family: "IPv6", internal: false };
+const LO = { address: "127.0.0.1", family: "IPv4", internal: true };
+
+async function withNetwork(host, fn) {
+  const realInterfaces = os.networkInterfaces;
+  os.networkInterfaces = () => ({ lo0: [LO], en0: [LAN, LAN6] });
+  if (host === undefined) delete process.env.HOST;
+  else process.env.HOST = host;
+  try {
+    await fn();
+  } finally {
+    os.networkInterfaces = realInterfaces;
+    delete process.env.HOST;
+  }
+}
+
+test("listening beyond loopback, this computer's IP addresses work as Host and Origin", async () => {
+  fake.reset();
+  await withNetwork("0.0.0.0", async () => {
+    for (const host of [`192.168.50.10:${port}`, "192.168.50.10", `[fd00:abcd::10]:${port}`, `[FD00:ABCD:0:0::10]:${port}`, `127.0.0.1:${port}`, `localhost:${port}`]) {
+      assert.equal((await send("GET", "/api/credentials", { host })).status, 200, host);
+    }
+    assert.equal((await send("GET", "/index.html", { host: `192.168.50.10:${port}` })).status, 200);
+    const created = await send("POST", "/api/dest/user-groups", { host: `192.168.50.10:${port}`, origin: `http://192.168.50.10:${port}`, body: { name: "LAN users" } });
+    assert.equal(created.status, 201);
+    const v6 = await send("POST", "/api/dest/user-groups", { host: `[fd00:abcd::10]:${port}`, origin: `http://[fd00:abcd::10]:${port}`, body: { name: "LAN6 users" } });
+    assert.equal(v6.status, 201);
+    assert.equal(fake.writes().length, 2);
+  });
+});
+
+test("listening beyond loopback, other names, other addresses and other sites are still refused", async () => {
+  fake.reset();
+  await withNetwork("::", async () => {
+    for (const host of ["evil.example", `rebind.attacker.example:${port}`, "192.168.50.11", "192.168.50.10.attacker.example", "[fd00:abcd::11]"]) {
+      const res = await send("GET", "/api/credentials", { host });
+      assert.equal(res.status, 403, host);
+      assert.equal(res.body.error, "forbidden_host");
+      assert.equal(res.body.message, "Open the tool at this computer's IP address, or add the name you used to ALLOWED_HOSTS.");
+    }
+    for (const origin of ["https://attacker.example", `http://rebind.attacker.example:${port}`, "http://192.168.50.11", "null"]) {
+      const res = await send("POST", "/api/dest/user-groups", { host: `192.168.50.10:${port}`, origin, body: { name: "x" } });
+      assert.equal(res.status, 403, origin);
+      assert.equal(res.body.error, "forbidden_origin");
+    }
+    process.env.ALLOWED_HOSTS = "migrate-box.local";
+    try {
+      assert.equal((await send("GET", "/api/credentials", { host: `migrate-box.local:${port}` })).status, 200);
+      const res = await send("POST", "/api/dest/user-groups", { host: `migrate-box.local:${port}`, origin: `http://migrate-box.local:${port}`, body: { name: "Named users" } });
+      assert.equal(res.status, 201);
+    } finally {
+      delete process.env.ALLOWED_HOSTS;
+    }
+  });
+  assert.equal(fake.writes().length, 1);
+});
+
+test("on loopback (the default), this computer's other addresses are not accepted as Host", async () => {
+  for (const host of [undefined, "127.0.0.1", "::1"]) {
+    await withNetwork(host, async () => {
+      const res = await send("GET", "/api/credentials", { host: `192.168.50.10:${port}` });
+      assert.equal(res.status, 403, String(host));
+      assert.equal(res.body.message, "Open the tool at http://127.0.0.1 or http://localhost.");
+      assert.equal((await send("GET", "/api/credentials")).status, 200);
+    });
+  }
+});
