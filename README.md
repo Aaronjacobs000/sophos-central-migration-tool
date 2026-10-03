@@ -128,13 +128,15 @@ HOST=0.0.0.0
 ALLOWED_IPS=192.168.1.0/24
 ```
 
-`ALLOWED_IPS` takes addresses and CIDR subnets, IPv4 or IPv6, comma-separated. Anyone else gets 403 on every page and API call. The computer running the tool is always allowed. Examples:
+`ALLOWED_IPS` takes addresses and CIDR subnets, IPv4 or IPv6, comma-separated. Anyone else gets 403 on every page and API call. On the computer running the tool, 127.0.0.1 and localhost always work; its own network address needs to be in the list like any other. Examples:
 
 - `ALLOWED_IPS=192.168.1.0/24`: a /24 LAN.
 - `ALLOWED_IPS=192.168.1.25`: one machine.
 - `ALLOWED_IPS=100.64.0.0/10`: Tailscale devices (add `fd7a:115c:a1e0::/48` if `HOST` is `::`).
 
 Without `ALLOWED_IPS`, anyone who can reach the port can use the tool, and the server warns about it at startup. An entry that isn't an address or subnet stops the server with an error.
+
+The server also stops with one error line, not a crash, if `HOST` isn't one of this computer's addresses or the port is already in use. The line says which, and what to change.
 
 Browse to `http://<this computer's IP>:3100`; the computer's own IP addresses are accepted. To browse by name, for example a `.local` name or a Tailscale MagicDNS name, add the name to `ALLOWED_HOSTS` (comma-separated).
 
